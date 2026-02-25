@@ -407,15 +407,19 @@ def prompt_searchable_choice(prompt_text: str, options: List[str], placeholder: 
                 return 'enter'
             elif key == b'\x08':  # Backspace
                 return 'backspace'
-            elif key == b'\xe0':  # Arrow keys prefix
+            elif key == b'\xe0' or key == b'\x00':  # Arrow keys prefix (both \xe0 and \x00)
                 arrow = msvcrt.getch()
                 if arrow == b'H':  # Up
                     return 'up'
                 elif arrow == b'P':  # Down
                     return 'down'
-            elif key == b'\x00':  # Function keys prefix
-                msvcrt.getch()  # Consume next byte
-                return None
+                elif arrow == b'K':  # Left
+                    return None
+                elif arrow == b'M':  # Right
+                    return None
+                else:
+                    # Consume unknown special key
+                    return None
             else:
                 try:
                     return key.decode('utf-8')
@@ -774,15 +778,19 @@ def prompt_searchable_choice_commands(prompt_text: str, options: List[str]) -> s
                 return 'enter'
             elif key == b'\x08':  # Backspace
                 return 'backspace'
-            elif key == b'\xe0':  # Arrow keys prefix
+            elif key == b'\xe0' or key == b'\x00':  # Arrow keys prefix (both \xe0 and \x00)
                 arrow = msvcrt.getch()
                 if arrow == b'H':  # Up
                     return 'up'
                 elif arrow == b'P':  # Down
                     return 'down'
-            elif key == b'\x00':  # Function keys prefix
-                msvcrt.getch()  # Consume next byte
-                return None
+                elif arrow == b'K':  # Left
+                    return None
+                elif arrow == b'M':  # Right
+                    return None
+                else:
+                    # Consume unknown special key
+                    return None
             else:
                 try:
                     return key.decode('utf-8')
@@ -968,6 +976,9 @@ def display_input_prompt_with_slash_detection() -> tuple:
             # Only trigger if at start of line
             if event.app.current_buffer.cursor_position == 0:
                 event.app.exit(result='__SHOW_COMMANDS__')
+            else:
+                # Insert / normally if not at start
+                event.app.current_buffer.insert_text('/')
         
         @kb.add('@')
         def _(event):
@@ -1206,9 +1217,11 @@ class RunningIndicator:
         self.start_time = 0
         self.spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
         self.spinner_idx = 0
+        self.cancelled = False
 
     def start(self):
         self.running = True
+        self.cancelled = False
         self.start_time = time.time()
         self.thread = threading.Thread(target=self._display)
         self.thread.daemon = True
@@ -1222,9 +1235,36 @@ class RunningIndicator:
         elapsed = time.time() - self.start_time
         print("\r" + " " * WIDTH + "\r", end="", flush=True)
         return elapsed
+    
+    def is_cancelled(self) -> bool:
+        """Check if user pressed ESC to cancel."""
+        return self.cancelled
 
     def _display(self):
+        import msvcrt
+        import sys
+        import _thread
+        
         while self.running:
+            # Check for ESC or Ctrl+C key press (non-blocking)
+            if msvcrt.kbhit():
+                key = msvcrt.getch()
+                if key == b'\x1b':  # ESC key
+                    self.cancelled = True
+                    self.running = False
+                    print(f"\r{' ' * 80}\r{Fore.YELLOW}✗ Cancelled{Style.RESET_ALL}\n", flush=True)
+                    # Interrupt the main thread to stop the API call
+                    _thread.interrupt_main()
+                    return
+                elif key == b'\x03':  # Ctrl+C
+                    self.cancelled = True
+                    self.running = False
+                    print(f"\r{' ' * 80}\r{Fore.YELLOW}✗ Cancelled{Style.RESET_ALL}\n", flush=True)
+                    # Raise KeyboardInterrupt to be caught by app_controller
+                    _thread.interrupt_main()
+                    return
+                    raise KeyboardInterrupt()
+            
             elapsed = int(time.time() - self.start_time)
             spinner = self.spinner_chars[self.spinner_idx % len(self.spinner_chars)]
             self.spinner_idx += 1
@@ -1237,8 +1277,8 @@ class RunningIndicator:
             else:
                 time_str = f"{elapsed}s"
             
-            # Build the message
-            message = f"{Fore.CYAN}{spinner}{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Thinking... {time_str}{Style.RESET_ALL}"
+            # Build the message with purple "Thinking"
+            message = f"{Fore.CYAN}{spinner}{Style.RESET_ALL} {Fore.MAGENTA}Thinking... {time_str}{Style.RESET_ALL}"
             
             # Clear the entire line and print the message
             print(f"\r{' ' * 80}\r{message}", end="", flush=True)

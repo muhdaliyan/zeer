@@ -100,7 +100,8 @@ def create_file(path: str, content: str = "") -> str:
             file_path = Path.cwd() / path
         
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(content)
+        # Use UTF-8 encoding explicitly to handle all Unicode characters
+        file_path.write_text(content, encoding='utf-8')
         return f"File created: {file_path}"
     except Exception as e:
         raise Exception(f"Failed to create file: {str(e)}")
@@ -116,7 +117,8 @@ def read_file(path: str) -> str:
         
         if not file_path.exists():
             raise Exception(f"File not found: {path}")
-        return file_path.read_text()
+        # Use UTF-8 encoding explicitly
+        return file_path.read_text(encoding='utf-8')
     except Exception as e:
         raise Exception(f"Failed to read file: {str(e)}")
 
@@ -238,7 +240,15 @@ def find_file_or_folder(name: str) -> str:
 
 
 def run_code(code: str, language: str = "python") -> str:
-    """Execute code in a subprocess and return the output."""
+    """Execute Python code in a subprocess and return the output.
+    
+    IMPORTANT: This tool ONLY executes Python code. Do NOT use this for:
+    - Shell commands (npm, git, etc.) - use run_shell_command tool instead
+    - System commands - use run_shell_command tool instead
+    - Package installations - use install_package tool instead
+    
+    Only use this for actual Python scripts and code snippets.
+    """
     import subprocess
     import tempfile
     import re
@@ -291,6 +301,126 @@ def run_code(code: str, language: str = "python") -> str:
         raise Exception("Code execution timed out after 5 minutes")
     except Exception as e:
         raise Exception(f"Failed to execute code: {str(e)}")
+
+
+def run_shell_command(command: str, working_directory: str = ".") -> str:
+    """Execute a shell command (npm, git, etc.) and return the output.
+    
+    Use this tool for:
+    - npm commands: npm install, npm create, npm run, etc.
+    - git commands: git clone, git commit, git push, etc.
+    - System commands: mkdir, cd, ls, dir, etc.
+    - Any other shell/terminal commands
+    
+    Args:
+        command: The shell command to execute (e.g., "npm install react")
+        working_directory: Directory to run the command in (default: current directory)
+    
+    Returns:
+        Command output (stdout and stderr combined)
+    """
+    import subprocess
+    import os
+    import sys
+    from colorama import Fore, Style
+    
+    try:
+        # Resolve working directory
+        work_dir = Path(working_directory)
+        if not work_dir.is_absolute():
+            work_dir = Path.cwd() / working_directory
+        
+        # Create directory if it doesn't exist
+        work_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Convert npm create to npx with -y flag to avoid prompts
+        if command.startswith('npm create '):
+            # npm create vite@latest -> npx -y create-vite@latest
+            command = command.replace('npm create ', 'npx -y create-', 1)
+        
+        # For Windows, wrap commands that might prompt in echo y |
+        if sys.platform == 'win32' and ('npm create' in command or 'npx create' in command):
+            command = f'echo y | {command}'
+        
+        # Show what command is running
+        print(f"\n{Fore.CYAN}Running: {command}{Style.RESET_ALL}")
+        if str(work_dir) != ".":
+            print(f"{Fore.LIGHTBLACK_EX}In: {work_dir}{Style.RESET_ALL}")
+        
+        # Set environment variables to skip all prompts
+        env = os.environ.copy()
+        env['npm_config_yes'] = 'true'
+        env['CI'] = 'true'  # Many tools skip prompts in CI mode
+        env['FORCE_COLOR'] = '0'  # Disable color codes that might interfere
+        
+        # Run the command with real-time output
+        process = subprocess.Popen(
+            command,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.PIPE,  # Provide stdin to send 'y' if needed
+            text=True,
+            cwd=str(work_dir),
+            env=env,
+            encoding='utf-8',
+            errors='replace',
+            bufsize=1,
+            universal_newlines=True
+        )
+        
+        # Send 'y' to stdin immediately to handle any prompts
+        try:
+            process.stdin.write('y\n')
+            process.stdin.flush()
+            process.stdin.close()
+        except:
+            pass  # If stdin is already closed, that's fine
+        
+        output_lines = []
+        
+        # Read output in real-time
+        try:
+            while True:
+                line = process.stdout.readline()
+                if not line:
+                    # Check if process finished
+                    if process.poll() is not None:
+                        break
+                    continue
+                
+                line = line.rstrip()
+                if line:
+                    print(f"{Fore.LIGHTBLACK_EX}{line}{Style.RESET_ALL}")
+                    output_lines.append(line)
+        except KeyboardInterrupt:
+            process.kill()
+            raise
+        
+        # Wait for process to complete with timeout
+        try:
+            return_code = process.wait(timeout=600)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            raise Exception("Command execution timed out after 10 minutes")
+        
+        combined_output = '\n'.join(output_lines)
+        
+        # Check for errors
+        if return_code != 0:
+            error_msg = f"Command failed with return code {return_code}"
+            if combined_output:
+                error_msg += f":\n{combined_output}"
+            raise Exception(error_msg)
+        
+        print(f"{Fore.GREEN}✓ Command completed{Style.RESET_ALL}\n")
+        return combined_output if combined_output else "Command executed successfully"
+        
+    except subprocess.TimeoutExpired:
+        process.kill()
+        raise Exception("Command execution timed out after 10 minutes")
+    except Exception as e:
+        raise Exception(f"Failed to execute command: {str(e)}")
 
 
 def read_skill_reference(skill_name: str, reference_path: str) -> str:
@@ -349,8 +479,7 @@ def run_dev_server(directory: str, install_command: str = "npm install", dev_com
         print(f"{Fore.GREEN}✓ Dependencies installed{Style.RESET_ALL}\n")
         
         # Step 2: Start dev server
-        print(f"{Fore.CYAN}Starting development server...{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}Press Ctrl+C to stop the server{Style.RESET_ALL}\n")
+        print(f"{Fore.CYAN}Starting development server...{Style.RESET_ALL}\n")
         
         # Start the dev server in a subprocess
         process = subprocess.Popen(
@@ -411,8 +540,7 @@ def run_dev_server(directory: str, install_command: str = "npm install", dev_com
             raise Exception("Dev server did not start within expected time. Check the output above for errors.")
         
         # Server started successfully
-        print(f"\n{Fore.GREEN}✓ Server is running!{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}Press Ctrl+C to stop...{Style.RESET_ALL}\n")
+        print(f"\n{Fore.GREEN}✓ Server is running!{Style.RESET_ALL}\n")
         
         try:
             # Keep running until interrupted
@@ -446,7 +574,6 @@ def run_dev_server(directory: str, install_command: str = "npm install", dev_com
 def install_npm_package(package_name: str, directory: str = ".") -> str:
     """Install an npm package in a project directory."""
     import subprocess
-    from src.cli_interface import prompt_choice, WIDTH
     from colorama import Fore, Style
     
     try:
@@ -458,20 +585,7 @@ def install_npm_package(package_name: str, directory: str = ".") -> str:
         if not dir_path.exists():
             raise Exception(f"Directory not found: {directory}")
         
-        # Clear the spinner line before prompting
-        print("\r" + " " * WIDTH + "\r", end="", flush=True)
-        
-        # Ask user for confirmation
-        print(f"\n{Fore.YELLOW}NPM package '{package_name}' is required but not installed.{Style.RESET_ALL}")
-        choice = prompt_choice(
-            f"Do you want to install '{package_name}'?",
-            ["Allow", "Deny"]
-        )
-        
-        if choice == "Deny":
-            return f"Installation of '{package_name}' was denied by user."
-        
-        # User allowed, proceed with installation
+        # Auto-install without prompting
         print(f"\n{Fore.CYAN}Installing {package_name}...{Style.RESET_ALL}")
         
         result = subprocess.run(
@@ -484,6 +598,7 @@ def install_npm_package(package_name: str, directory: str = ".") -> str:
         )
         
         if result.returncode == 0:
+            print(f"{Fore.GREEN}✓ Installed {package_name}{Style.RESET_ALL}")
             return f"Successfully installed '{package_name}'. The package is now available in your project."
         else:
             raise Exception(f"Installation failed: {result.stderr}")
@@ -497,13 +612,9 @@ def install_npm_package(package_name: str, directory: str = ".") -> str:
 def install_package(package_name: str) -> str:
     """Install a Python package using pip with user confirmation."""
     import subprocess
-    from src.cli_interface import prompt_choice, WIDTH
     from colorama import Fore, Style
     
     try:
-        # Clear the spinner line before prompting
-        print("\r" + " " * WIDTH + "\r", end="", flush=True)
-        
         # Handle common package name aliases
         package_aliases = {
             'sklearn': 'scikit-learn',
@@ -513,22 +624,11 @@ def install_package(package_name: str) -> str:
         
         actual_package = package_aliases.get(package_name, package_name)
         
-        # Ask user for confirmation
+        # Auto-install without prompting
         if actual_package != package_name:
-            print(f"\n{Fore.YELLOW}Package '{package_name}' is required (will install as '{actual_package}').{Style.RESET_ALL}")
+            print(f"\n{Fore.CYAN}Installing {package_name} (as {actual_package})...{Style.RESET_ALL}")
         else:
-            print(f"\n{Fore.YELLOW}Package '{package_name}' is required but not installed.{Style.RESET_ALL}")
-        
-        choice = prompt_choice(
-            f"Do you want to install '{actual_package}'?",
-            ["Allow", "Deny"]
-        )
-        
-        if choice == "Deny":
-            return f"Installation of '{actual_package}' was denied by user."
-        
-        # User allowed, proceed with installation
-        print(f"\n{Fore.CYAN}Installing {actual_package}...{Style.RESET_ALL}")
+            print(f"\n{Fore.CYAN}Installing {actual_package}...{Style.RESET_ALL}")
         
         result = subprocess.run(
             ['pip', 'install', actual_package],
@@ -538,6 +638,7 @@ def install_package(package_name: str) -> str:
         )
         
         if result.returncode == 0:
+            print(f"{Fore.GREEN}✓ Installed {actual_package}{Style.RESET_ALL}")
             return f"Successfully installed '{actual_package}'. You can now use it in your code."
         else:
             raise Exception(f"Installation failed: {result.stderr}")
@@ -710,7 +811,7 @@ def create_default_registry() -> ToolRegistry:
     
     registry.register(Tool(
         name="run_code",
-        description="Execute Python code and return the output. Useful for running scripts to generate files, process data, etc.",
+        description="Execute Python code and return the output. ONLY for Python scripts. For shell commands (npm, git, etc.), use run_shell_command instead.",
         parameters={
             "type": "object",
             "properties": {
@@ -727,6 +828,27 @@ def create_default_registry() -> ToolRegistry:
             "required": ["code"]
         },
         function=run_code
+    ))
+    
+    registry.register(Tool(
+        name="run_shell_command",
+        description="Execute shell commands like npm, git, mkdir, etc. Use this for any terminal/command-line operations. Examples: 'npm install react', 'git clone <url>', 'npm create vite@latest my-app -- --template react'",
+        parameters={
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The shell command to execute (e.g., 'npm install', 'git status')"
+                },
+                "working_directory": {
+                    "type": "string",
+                    "description": "Directory to run the command in (default: current directory)",
+                    "default": "."
+                }
+            },
+            "required": ["command"]
+        },
+        function=run_shell_command
     ))
     
     registry.register(Tool(
@@ -751,7 +873,7 @@ def create_default_registry() -> ToolRegistry:
     
     registry.register(Tool(
         name="install_package",
-        description="Install a Python package using pip. This will prompt the user for confirmation before installing. Use this when you encounter 'ModuleNotFoundError' or need a specific Python library.",
+        description="Install a Python package using pip automatically. Use this when you encounter 'ModuleNotFoundError' or need a specific Python library. Installs immediately without prompting.",
         parameters={
             "type": "object",
             "properties": {
@@ -767,7 +889,7 @@ def create_default_registry() -> ToolRegistry:
     
     registry.register(Tool(
         name="install_npm_package",
-        description="Install an npm package in a Node.js/React project. Use this when you encounter missing npm packages or need JavaScript libraries. This will prompt the user for confirmation before installing.",
+        description="Install an npm package in a Node.js/React project automatically. Use this when you encounter missing npm packages or need JavaScript libraries. Installs immediately without prompting.",
         parameters={
             "type": "object",
             "properties": {

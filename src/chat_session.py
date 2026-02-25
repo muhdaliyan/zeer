@@ -45,49 +45,62 @@ class ChatSession:
         system_prompt = """You are an autonomous AI assistant with access to tools and skills. CRITICAL INSTRUCTIONS:
 
 AUTONOMY & EXECUTION:
-1. When given a task, you MUST call ALL necessary tools to complete it
-2. DO NOT stop after calling one or two tools - call ALL files/tools needed
-3. DO NOT ask "should I continue?" or wait for user confirmation
-4. DO NOT say "I'll create the files" and then stop - CREATE THEM ALL IMMEDIATELY
-5. Complete the ENTIRE task before responding with text
-6. Tools are executed sequentially with progress shown to the user
+1. START IMMEDIATELY - Don't overthink, begin calling tools right away
+2. When given a task, you MUST call ALL necessary tools to complete it in ONE GO
+3. DO NOT stop after calling one or two tools - call ALL files/tools needed
+4. DO NOT ask "should I continue?" or wait for user confirmation
+5. DO NOT say "I'll create the files" and then stop - CREATE THEM ALL IMMEDIATELY
+6. DO NOT explain what you're going to do - JUST DO IT
+7. Complete the ENTIRE task before responding with text
+8. Tools are executed sequentially with progress shown to the user
+9. SPEED MATTERS - Start with the first tool call within seconds, not minutes
+10. When user says "fix it" or "run and fix" - DO IT ALL: read files, fix issues, update files, run commands
 
-QUALITY STANDARDS (MOST IMPORTANT):
-- ALWAYS create professional, production-quality outputs
-- Take your time to think through each file's purpose and implementation
+FIXING ISSUES:
+- When user reports an error, immediately read the relevant files, identify the issue, fix ALL related files, and test
+- DO NOT explain the problem and ask if they want you to fix it - JUST FIX IT
+- DO NOT provide step-by-step instructions for the user - DO THE STEPS YOURSELF
+- If something needs to be restarted, use run_shell_command to do it
+- Fix everything in one complete action, don't make the user ask multiple times
+
+QUALITY STANDARDS (IMPORTANT):
+- Create professional, production-quality outputs
 - Use modern design patterns, advanced styling, and polished aesthetics
 - Think like an expert professional, not a beginner
 - Each file should be well-structured, properly commented, and follow best practices
 - Pay attention to visual details, spacing, and user experience
 - When skills are activated, follow their specific quality guidelines carefully
-- DO NOT rush or create generic template code - make it thoughtful and complete
+- Balance quality with speed - don't spend 10+ minutes planning
 
 FILE CREATION APPROACH:
-- When creating multiple files, think about each one individually
+- When creating multiple files, start immediately with the first one
 - Consider how files interact and depend on each other
 - Add proper imports, error handling, and edge cases
 - Include helpful comments explaining complex logic
-- Make sure styling is modern and visually appealing (not basic/ugly)
-- Test your logic mentally before creating files
+- Make sure styling is modern and visually appealing
 
 WEB PROJECTS:
-- After creating a web project (React, Vue, etc.), ALWAYS call run_dev_server tool
-- This will automatically install dependencies and start the dev server
-- The server will show the URL and run until user presses Ctrl+C
-- DO NOT tell the user to manually run npm install or npm run dev
-- If you encounter missing npm packages, use install_npm_package tool (NOT install_package)
+- For React/Vite projects: Use run_shell_command("npm create vite@latest project-name -- --template react")
+- The tool automatically handles prompts - just use the standard npm create command
+- After project creation, use run_shell_command("npm install") in the project directory
+- Use run_shell_command for any npm/git/shell commands
+- DO NOT use run_code for shell commands - it only works for Python
+- When fixing web projects, update ALL necessary files (package.json, config files, CSS, components) in one go
+
+SHELL COMMANDS:
+- Use run_shell_command tool for: npm, git, mkdir, and all terminal commands
+- Use run_code tool ONLY for Python scripts
+- Examples: run_shell_command("npm install react"), run_shell_command("git init")
 
 PACKAGE INSTALLATION:
 - For Python packages: Use install_package tool when you encounter "ModuleNotFoundError"
-- For npm/JavaScript packages: Use install_npm_package tool for missing npm packages
-- Both tools will automatically prompt the user for confirmation
+- For npm/JavaScript packages: Use run_shell_command with "npm install package-name"
 - After installation succeeds, retry the operation
-- DO NOT tell the user to manually install packages
 
-You have the ability to call multiple tools in one response. USE IT. The user expects you to finish the job completely without interruption. But remember: QUALITY over speed - make it professional."""
+You have the ability to call multiple tools in one response. USE IT. Start immediately and work efficiently. Be autonomous - don't ask permission, just execute."""
 
         self.add_message("user", system_prompt)
-        self.add_message("assistant", "Understood. I will create professional, high-quality outputs and complete tasks fully and autonomously. For web projects, I will automatically run the dev server. For missing packages, I will use install_package for Python and install_npm_package for JavaScript/npm packages. When skills are activated, I will follow their specific guidelines carefully.")
+        self.add_message("assistant", "Understood. I will work autonomously and complete tasks fully without asking for permission. When you say 'fix it', I'll read the files, identify issues, update everything needed, and test - all in one go. I'll create professional, high-quality outputs efficiently.")
         
         # Add system message with skills metadata if available
         if self.skills_manager:
@@ -300,16 +313,16 @@ You have the ability to call multiple tools in one response. USE IT. The user ex
                         
                         # Show path or key argument on same line if available
                         if "path" in tool_args:
-                            print(f"{Fore.CYAN}{tool_args['path']}{Style.RESET_ALL}", end="")
+                            print(f"{Fore.CYAN}{tool_args['path']}{Style.RESET_ALL} ", end="")
                         elif "directory" in tool_args:
-                            print(f"{Fore.CYAN}{tool_args['directory']}{Style.RESET_ALL}", end="")
+                            print(f"{Fore.CYAN}{tool_args['directory']}{Style.RESET_ALL} ", end="")
                         
                         # Execute the tool
                         from src.tools import ToolCall
                         result = self.tool_registry.execute_tool(ToolCall(tool_name, tool_args))
                         
                         if result.success:
-                            print(f" {Fore.GREEN}✓ Done{Style.RESET_ALL}")
+                            print(f"{Fore.GREEN}✓{Style.RESET_ALL}")
                             tool_call_messages.append({
                                 "role": "tool",
                                 "tool_call_id": tool_call_id,
@@ -321,9 +334,9 @@ You have the ability to call multiple tools in one response. USE IT. The user ex
                             if "Traceback" in error_msg:
                                 lines = error_msg.split('\n')
                                 error_line = next((line for line in reversed(lines) if line.strip()), error_msg)
-                                print(f"  {Fore.RED}✗ {error_line}{Style.RESET_ALL}")
+                                print(f"{Fore.RED}✗ {error_line}{Style.RESET_ALL}")
                             else:
-                                print(f"  {Fore.RED}✗ {result.error}{Style.RESET_ALL}")
+                                print(f"{Fore.RED}✗ {result.error}{Style.RESET_ALL}")
                             
                             tool_call_messages.append({
                                 "role": "tool",
@@ -341,66 +354,53 @@ You have the ability to call multiple tools in one response. USE IT. The user ex
                             print(f"\n{Fore.YELLOW}⏸  Pausing to review progress...{Style.RESET_ALL}\n")
                             time.sleep(0.5)
                     
-                    print()  # Add spacing after all tools
+                    print()  # Single line after all tools
+
                     
                 else:
                     # FAST MODE: Original behavior - execute all at once
-                    # Group tool calls by type for cleaner display
-                    tool_groups = {}
                     for tool_call in response.tool_calls:
                         tool_name = tool_call["function"]["name"]
-                        if tool_name not in tool_groups:
-                            tool_groups[tool_name] = []
-                        tool_groups[tool_name].append(tool_call)
-                    
-                    # Display and execute tool calls
-                    for tool_name, calls in tool_groups.items():
+                        tool_args = json.loads(tool_call["function"]["arguments"])
+                        tool_call_id = tool_call["id"]
+                        
                         # Show tool name in [Tool: name] format
-                        print(f"{Fore.LIGHTBLACK_EX}[Tool: {tool_name}]{Style.RESET_ALL}")
+                        print(f"{Fore.LIGHTBLACK_EX}[Tool: {tool_name}]{Style.RESET_ALL} ", end="")
                         
-                        # Show collapsed indicator if multiple calls
-                        if len(calls) > 1:
-                            print(f"  {Fore.LIGHTBLACK_EX}└─ {len(calls)} calls{Style.RESET_ALL}")
+                        # Show path or key argument on same line if available
+                        if "path" in tool_args:
+                            print(f"{Fore.CYAN}{tool_args['path']}{Style.RESET_ALL} ", end="")
+                        elif "directory" in tool_args:
+                            print(f"{Fore.CYAN}{tool_args['directory']}{Style.RESET_ALL} ", end="")
                         
-                        # Execute each call
-                        for tool_call in calls:
-                            tool_args = json.loads(tool_call["function"]["arguments"])
-                            tool_call_id = tool_call["id"]
-                            
-                            # Show path or key argument if available
-                            if "path" in tool_args:
-                                print(f"     {Fore.CYAN}{tool_args['path']}{Style.RESET_ALL} {Fore.GREEN}✓ Done{Style.RESET_ALL}")
-                            elif "directory" in tool_args:
-                                print(f"     {Fore.CYAN}{tool_args['directory']}{Style.RESET_ALL} {Fore.GREEN}✓ Done{Style.RESET_ALL}")
-                            
-                            # Execute the tool
-                            from src.tools import ToolCall
-                            result = self.tool_registry.execute_tool(ToolCall(tool_name, tool_args))
-                            
-                            if result.success:
-                                tool_call_messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call_id,
-                                    "content": result.output
-                                })
+                        # Execute the tool
+                        from src.tools import ToolCall
+                        result = self.tool_registry.execute_tool(ToolCall(tool_name, tool_args))
+                        
+                        if result.success:
+                            print(f"{Fore.GREEN}✓{Style.RESET_ALL}")
+                            tool_call_messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "content": result.output
+                            })
+                        else:
+                            # Show error inline
+                            error_msg = result.error
+                            if "Traceback" in error_msg:
+                                lines = error_msg.split('\n')
+                                error_line = next((line for line in reversed(lines) if line.strip()), error_msg)
+                                print(f"{Fore.RED}✗ {error_line}{Style.RESET_ALL}")
                             else:
-                                # Show error inline
-                                error_msg = result.error
-                                if "Traceback" in error_msg:
-                                    lines = error_msg.split('\n')
-                                    error_line = next((line for line in reversed(lines) if line.strip()), error_msg)
-                                    print(f"     {Fore.RED}✗ {error_line}{Style.RESET_ALL}")
-                                else:
-                                    print(f"     {Fore.RED}✗ {result.error}{Style.RESET_ALL}")
-                                
-                                tool_call_messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call_id,
-                                    "content": f"Error: {result.error}"
-                                })
+                                print(f"{Fore.RED}✗ {result.error}{Style.RESET_ALL}")
+                            
+                            tool_call_messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "content": f"Error: {result.error}"
+                            })
                     
-                    # Add spacing after tool calls
-                    print()
+                    print()  # Single line after all tools
                 
                 # Add assistant's tool call message with actual tool_calls data
                 # Store as JSON so we can reconstruct it

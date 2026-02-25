@@ -550,6 +550,11 @@ class AppController:
                     # Stop indicator and get elapsed time
                     elapsed_time = indicator.stop()
                     
+                    # Check if user cancelled during thinking
+                    if indicator.is_cancelled():
+                        print(f"{Fore.YELLOW}✗ Operation cancelled{Style.RESET_ALL}\n")
+                        continue
+                    
                     # Display assistant response with metadata
                     display_assistant_message(
                         response.content,
@@ -558,6 +563,13 @@ class AppController:
                         elapsed_time,
                         self.chat_session.context_window
                     )
+                except KeyboardInterrupt:
+                    # Stop indicator and cancel operation, but don't exit
+                    indicator.stop()
+                    # Small delay to ensure cancellation message is visible
+                    import time
+                    time.sleep(0.1)
+                    continue
                 except Exception as e:
                     # Make sure to stop indicator on error
                     indicator.stop()
@@ -576,6 +588,7 @@ class AppController:
                 print(f"\n{Fore.YELLOW}You can try again or use /help for commands.{Style.RESET_ALL}\n")
                     
             except KeyboardInterrupt:
+                # Only exit if Ctrl+C pressed when not thinking
                 print(f"\n\n{Fore.CYAN}Exiting chat...{Style.RESET_ALL}")
                 break
                 
