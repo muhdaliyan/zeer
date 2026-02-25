@@ -1,0 +1,815 @@
+"""
+Tool calling system for zeer CLI.
+
+This module provides the infrastructure for AI agents to call tools/functions
+to perform actions like file operations, system commands, etc.
+"""
+
+import os
+import json
+from typing import List, Dict, Any, Optional, Callable
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass
+class Tool:
+    """Represents a callable tool that agents can use."""
+    name: str
+    description: str
+    parameters: Dict[str, Any]
+    function: Callable
+
+
+@dataclass
+class ToolCall:
+    """Represents a tool call request from the agent."""
+    tool_name: str
+    arguments: Dict[str, Any]
+
+
+@dataclass
+class ToolResult:
+    """Represents the result of a tool execution."""
+    success: bool
+    output: str
+    error: Optional[str] = None
+
+
+class ToolRegistry:
+    """Registry for managing available tools."""
+    
+    def __init__(self):
+        self.tools: Dict[str, Tool] = {}
+    
+    def register(self, tool: Tool) -> None:
+        """Register a new tool."""
+        self.tools[tool.name] = tool
+    
+    def get_tool(self, name: str) -> Optional[Tool]:
+        """Get a tool by name."""
+        return self.tools.get(name)
+    
+    def list_tools(self) -> List[Tool]:
+        """List all registered tools."""
+        return list(self.tools.values())
+    
+    def get_tools_schema(self) -> List[Dict[str, Any]]:
+        """Get tool schemas for API requests (OpenAI/Anthropic format)."""
+        schemas = []
+        for tool in self.tools.values():
+            schemas.append({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters
+                }
+            })
+        return schemas
+    
+    def execute_tool(self, tool_call: ToolCall) -> ToolResult:
+        """Execute a tool call."""
+        tool = self.get_tool(tool_call.tool_name)
+        
+        if not tool:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Tool '{tool_call.tool_name}' not found"
+            )
+        
+        try:
+            result = tool.function(**tool_call.arguments)
+            return ToolResult(success=True, output=result)
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Error executing tool: {str(e)}"
+            )
+
+
+# File operation tools
+def create_file(path: str, content: str = "") -> str:
+    """Create a new file with optional content."""
+    try:
+        # Use current working directory for relative paths
+        file_path = Path(path)
+        if not file_path.is_absolute():
+            file_path = Path.cwd() / path
+        
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(content)
+        return f"File created: {file_path}"
+    except Exception as e:
+        raise Exception(f"Failed to create file: {str(e)}")
+
+
+def read_file(path: str) -> str:
+    """Read the contents of a file."""
+    try:
+        # Use current working directory for relative paths
+        file_path = Path(path)
+        if not file_path.is_absolute():
+            file_path = Path.cwd() / path
+        
+        if not file_path.exists():
+            raise Exception(f"File not found: {path}")
+        return file_path.read_text()
+    except Exception as e:
+        raise Exception(f"Failed to read file: {str(e)}")
+
+
+def list_directory(path: str = ".") -> str:
+    """List contents of a directory."""
+    try:
+        # Use current working directory for relative paths
+        dir_path = Path(path)
+        if not dir_path.is_absolute():
+            dir_path = Path.cwd() / path
+        
+        if not dir_path.exists():
+            raise Exception(f"Directory not found: {path}")
+        
+        items = []
+        for item in sorted(dir_path.iterdir()):
+            item_type = "DIR" if item.is_dir() else "FILE"
+            items.append(f"{item_type:5} {item.name}")
+        
+        return "\n".join(items) if items else "Empty directory"
+    except Exception as e:
+        raise Exception(f"Failed to list directory: {str(e)}")
+
+
+def make_directory(path: str) -> str:
+    """Create a new directory."""
+    try:
+        # Use current working directory for relative paths
+        dir_path = Path(path)
+        if not dir_path.is_absolute():
+            dir_path = Path.cwd() / path
+        
+        dir_path.mkdir(parents=True, exist_ok=True)
+        return f"Directory created: {dir_path}"
+    except Exception as e:
+        raise Exception(f"Failed to create directory: {str(e)}")
+
+
+def get_current_directory() -> str:
+    """Get the current working directory."""
+    cwd = str(Path.cwd())
+    home = str(Path.home())
+    return f"Current working directory: {cwd}\nUser home directory: {home}\n(Note: Files/folders are created in home directory by default)"
+
+
+def change_directory(path: str) -> str:
+    """Change the current working directory."""
+    try:
+        os.chdir(path)
+        return f"Changed directory to: {path}"
+    except Exception as e:
+        raise Exception(f"Failed to change directory: {str(e)}")
+
+
+def delete_file(path: str) -> str:
+    """Delete a file."""
+    try:
+        # Use current working directory for relative paths
+        file_path = Path(path)
+        if not file_path.is_absolute():
+            file_path = Path.cwd() / path
+        
+        if not file_path.exists():
+            raise Exception(f"File not found: {path}")
+        file_path.unlink()
+        return f"File deleted: {file_path}"
+    except Exception as e:
+        raise Exception(f"Failed to delete file: {str(e)}")
+
+
+def write_to_file(path: str, content: str, append: bool = False) -> str:
+    """Write content to a file (overwrite or append)."""
+    try:
+        # Use current working directory for relative paths
+        file_path = Path(path)
+        if not file_path.is_absolute():
+            file_path = Path.cwd() / path
+        
+        if append:
+            with open(file_path, 'a') as f:
+                f.write(content)
+            return f"Content appended to: {file_path}"
+        else:
+            file_path.write_text(content)
+            return f"Content written to: {file_path}"
+    except Exception as e:
+        raise Exception(f"Failed to write to file: {str(e)}")
+
+
+def find_file_or_folder(name: str) -> str:
+    """Find a file or folder by name in common locations."""
+    try:
+        search_locations = [
+            Path.home(),
+            Path.home() / "Desktop",
+            Path.home() / "Documents",
+            Path.home() / "Downloads",
+            Path.cwd()
+        ]
+        
+        found_items = []
+        for location in search_locations:
+            if not location.exists():
+                continue
+            
+            # Search in this location
+            for item in location.iterdir():
+                if name.lower() in item.name.lower():
+                    item_type = "DIR" if item.is_dir() else "FILE"
+                    found_items.append(f"{item_type}: {item}")
+        
+        if found_items:
+            return "Found:\n" + "\n".join(found_items)
+        else:
+            return f"No files or folders matching '{name}' found in common locations"
+    except Exception as e:
+        raise Exception(f"Failed to search: {str(e)}")
+
+
+def run_code(code: str, language: str = "python") -> str:
+    """Execute code in a subprocess and return the output."""
+    import subprocess
+    import tempfile
+    import re
+    
+    try:
+        # Only support Python for now
+        if language.lower() != "python":
+            raise Exception(f"Language '{language}' not supported. Only Python is supported.")
+        
+        # Create a temporary file with UTF-8 encoding
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:
+            # Add UTF-8 encoding declaration at the top
+            f.write("# -*- coding: utf-8 -*-\n")
+            f.write(code)
+            temp_file = f.name
+        
+        try:
+            # Run the code with longer timeout for complex operations
+            result = subprocess.run(
+                ['python', temp_file],
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5 minutes for complex data analysis/ML tasks
+                encoding='utf-8'
+            )
+            
+            output = result.stdout
+            stderr = result.stderr
+            
+            # Check for ModuleNotFoundError and suggest installation
+            if result.returncode != 0 and stderr:
+                # Look for missing module errors
+                module_match = re.search(r"ModuleNotFoundError: No module named '([^']+)'", stderr)
+                if module_match:
+                    module_name = module_match.group(1)
+                    raise Exception(f"Missing Python package '{module_name}'. Use install_package tool to install it.")
+                
+                output += f"\nErrors:\n{stderr}"
+                raise Exception(f"Code execution failed with return code {result.returncode}:\n{output}")
+            
+            if stderr:
+                output += f"\nWarnings:\n{stderr}"
+            
+            return output if output else "Code executed successfully (no output)"
+        finally:
+            # Clean up temp file
+            Path(temp_file).unlink(missing_ok=True)
+            
+    except subprocess.TimeoutExpired:
+        raise Exception("Code execution timed out after 5 minutes")
+    except Exception as e:
+        raise Exception(f"Failed to execute code: {str(e)}")
+
+
+def read_skill_reference(skill_name: str, reference_path: str) -> str:
+    """Read a reference file from a skill's directory."""
+    try:
+        from src.skills_manager import SkillsManager
+        skills_manager = SkillsManager("skills")
+        
+        content = skills_manager.resolve_file_reference(skill_name, reference_path)
+        if content:
+            return content
+        else:
+            raise Exception(f"Reference file not found: {reference_path}")
+    except Exception as e:
+        raise Exception(f"Failed to read reference: {str(e)}")
+
+
+def run_dev_server(directory: str, install_command: str = "npm install", dev_command: str = "npm run dev") -> str:
+    """Install dependencies and start a development server in a directory."""
+    import subprocess
+    import threading
+    import time
+    from colorama import Fore, Style
+    import sys
+    
+    try:
+        # Convert to absolute path
+        dir_path = Path(directory)
+        if not dir_path.is_absolute():
+            dir_path = Path.cwd() / directory
+        
+        if not dir_path.exists():
+            raise Exception(f"Directory not found: {directory}")
+        
+        # Clear spinner line
+        from src.cli_interface import WIDTH
+        print("\r" + " " * WIDTH + "\r", end="", flush=True)
+        
+        # Step 1: Install dependencies
+        print(f"\n{Fore.CYAN}Installing dependencies in {dir_path.name}...{Style.RESET_ALL}")
+        
+        # Use shell=True on Windows for npm commands
+        install_result = subprocess.run(
+            install_command,
+            cwd=str(dir_path),
+            capture_output=True,
+            text=True,
+            timeout=300,
+            shell=True
+        )
+        
+        if install_result.returncode != 0:
+            error_output = install_result.stderr or install_result.stdout
+            raise Exception(f"Installation failed:\n{error_output}")
+        
+        print(f"{Fore.GREEN}✓ Dependencies installed{Style.RESET_ALL}\n")
+        
+        # Step 2: Start dev server
+        print(f"{Fore.CYAN}Starting development server...{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}Press Ctrl+C to stop the server{Style.RESET_ALL}\n")
+        
+        # Start the dev server in a subprocess
+        process = subprocess.Popen(
+            dev_command,
+            cwd=str(dir_path),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            shell=True
+        )
+        
+        # Monitor output for URL and errors
+        url_found = False
+        error_detected = False
+        output_lines = []
+        server_started = False
+        
+        def read_output():
+            nonlocal url_found, error_detected, server_started
+            for line in iter(process.stdout.readline, ''):
+                if line:
+                    output_lines.append(line)
+                    
+                    # Check for errors
+                    if 'error' in line.lower() or 'missing script' in line.lower():
+                        error_detected = True
+                    
+                    # Check if server actually started
+                    if 'localhost' in line.lower() or 'local:' in line.lower():
+                        server_started = True
+                        url_found = True
+                    
+                    # Print output in real-time
+                    print(line, end='')
+        
+        # Start output reading thread
+        output_thread = threading.Thread(target=read_output, daemon=True)
+        output_thread.start()
+        
+        # Wait for server to start or error to occur
+        wait_time = 0
+        max_wait = 10  # Wait up to 10 seconds
+        
+        while wait_time < max_wait and not server_started and not error_detected:
+            if process.poll() is not None:
+                # Process ended
+                break
+            time.sleep(0.5)
+            wait_time += 0.5
+        
+        # Check if there was an error
+        if error_detected or (process.poll() is not None and not server_started):
+            error_output = '\n'.join(output_lines[-10:])  # Last 10 lines
+            raise Exception(f"Failed to start dev server:\n{error_output}")
+        
+        if not server_started:
+            raise Exception("Dev server did not start within expected time. Check the output above for errors.")
+        
+        # Server started successfully
+        print(f"\n{Fore.GREEN}✓ Server is running!{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}Press Ctrl+C to stop...{Style.RESET_ALL}\n")
+        
+        try:
+            # Keep running until interrupted
+            while process.poll() is None:
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            pass
+        
+        # Cleanup
+        print(f"\n{Fore.CYAN}Stopping server...{Style.RESET_ALL}")
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        
+        print(f"{Fore.GREEN}✓ Server stopped{Style.RESET_ALL}\n")
+        
+        return f"Development server ran successfully in {directory}"
+        
+    except subprocess.TimeoutExpired:
+        raise Exception("Installation timed out after 5 minutes")
+    except KeyboardInterrupt:
+        if 'process' in locals():
+            process.terminate()
+        raise Exception("Operation cancelled by user")
+    except Exception as e:
+        raise Exception(f"Failed to run dev server: {str(e)}")
+
+
+def install_npm_package(package_name: str, directory: str = ".") -> str:
+    """Install an npm package in a project directory."""
+    import subprocess
+    from src.cli_interface import prompt_choice, WIDTH
+    from colorama import Fore, Style
+    
+    try:
+        # Convert to absolute path
+        dir_path = Path(directory)
+        if not dir_path.is_absolute():
+            dir_path = Path.cwd() / directory
+        
+        if not dir_path.exists():
+            raise Exception(f"Directory not found: {directory}")
+        
+        # Clear the spinner line before prompting
+        print("\r" + " " * WIDTH + "\r", end="", flush=True)
+        
+        # Ask user for confirmation
+        print(f"\n{Fore.YELLOW}NPM package '{package_name}' is required but not installed.{Style.RESET_ALL}")
+        choice = prompt_choice(
+            f"Do you want to install '{package_name}'?",
+            ["Allow", "Deny"]
+        )
+        
+        if choice == "Deny":
+            return f"Installation of '{package_name}' was denied by user."
+        
+        # User allowed, proceed with installation
+        print(f"\n{Fore.CYAN}Installing {package_name}...{Style.RESET_ALL}")
+        
+        result = subprocess.run(
+            f"npm install {package_name}",
+            cwd=str(dir_path),
+            capture_output=True,
+            text=True,
+            timeout=300,
+            shell=True
+        )
+        
+        if result.returncode == 0:
+            return f"Successfully installed '{package_name}'. The package is now available in your project."
+        else:
+            raise Exception(f"Installation failed: {result.stderr}")
+            
+    except subprocess.TimeoutExpired:
+        raise Exception("Installation timed out after 5 minutes")
+    except Exception as e:
+        raise Exception(f"Failed to install npm package: {str(e)}")
+
+
+def install_package(package_name: str) -> str:
+    """Install a Python package using pip with user confirmation."""
+    import subprocess
+    from src.cli_interface import prompt_choice, WIDTH
+    from colorama import Fore, Style
+    
+    try:
+        # Clear the spinner line before prompting
+        print("\r" + " " * WIDTH + "\r", end="", flush=True)
+        
+        # Handle common package name aliases
+        package_aliases = {
+            'sklearn': 'scikit-learn',
+            'cv2': 'opencv-python',
+            'PIL': 'Pillow'
+        }
+        
+        actual_package = package_aliases.get(package_name, package_name)
+        
+        # Ask user for confirmation
+        if actual_package != package_name:
+            print(f"\n{Fore.YELLOW}Package '{package_name}' is required (will install as '{actual_package}').{Style.RESET_ALL}")
+        else:
+            print(f"\n{Fore.YELLOW}Package '{package_name}' is required but not installed.{Style.RESET_ALL}")
+        
+        choice = prompt_choice(
+            f"Do you want to install '{actual_package}'?",
+            ["Allow", "Deny"]
+        )
+        
+        if choice == "Deny":
+            return f"Installation of '{actual_package}' was denied by user."
+        
+        # User allowed, proceed with installation
+        print(f"\n{Fore.CYAN}Installing {actual_package}...{Style.RESET_ALL}")
+        
+        result = subprocess.run(
+            ['pip', 'install', actual_package],
+            capture_output=True,
+            text=True,
+            timeout=600  # 10 minutes for large packages like tensorflow
+        )
+        
+        if result.returncode == 0:
+            return f"Successfully installed '{actual_package}'. You can now use it in your code."
+        else:
+            raise Exception(f"Installation failed: {result.stderr}")
+            
+    except subprocess.TimeoutExpired:
+        raise Exception("Installation timed out after 10 minutes")
+    except Exception as e:
+        raise Exception(f"Failed to install package: {str(e)}")
+
+
+# Initialize default tool registry
+def create_default_registry() -> ToolRegistry:
+    """Create a registry with default file operation tools."""
+    registry = ToolRegistry()
+    
+    # Register file operation tools
+    registry.register(Tool(
+        name="create_file",
+        description="Create a new file with optional content",
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path to the file to create"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Content to write to the file (optional)",
+                    "default": ""
+                }
+            },
+            "required": ["path"]
+        },
+        function=create_file
+    ))
+    
+    registry.register(Tool(
+        name="read_file",
+        description="Read the contents of a file",
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path to the file to read"
+                }
+            },
+            "required": ["path"]
+        },
+        function=read_file
+    ))
+    
+    registry.register(Tool(
+        name="list_directory",
+        description="List contents of a directory (like ls command)",
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path to the directory to list (default: current directory)",
+                    "default": "."
+                }
+            },
+            "required": []
+        },
+        function=list_directory
+    ))
+    
+    registry.register(Tool(
+        name="make_directory",
+        description="Create a new directory (like mkdir command)",
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path to the directory to create"
+                }
+            },
+            "required": ["path"]
+        },
+        function=make_directory
+    ))
+    
+    registry.register(Tool(
+        name="get_current_directory",
+        description="Get the current working directory (like pwd command)",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": []
+        },
+        function=get_current_directory
+    ))
+    
+    registry.register(Tool(
+        name="change_directory",
+        description="Change the current working directory (like cd command)",
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path to change to"
+                }
+            },
+            "required": ["path"]
+        },
+        function=change_directory
+    ))
+    
+    registry.register(Tool(
+        name="delete_file",
+        description="Delete a file",
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path to the file to delete"
+                }
+            },
+            "required": ["path"]
+        },
+        function=delete_file
+    ))
+    
+    registry.register(Tool(
+        name="write_to_file",
+        description="Write or append content to a file",
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path to the file"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Content to write"
+                },
+                "append": {
+                    "type": "boolean",
+                    "description": "Whether to append (true) or overwrite (false)",
+                    "default": False
+                }
+            },
+            "required": ["path", "content"]
+        },
+        function=write_to_file
+    ))
+    
+    registry.register(Tool(
+        name="find_file_or_folder",
+        description="Search for a file or folder by name in common locations (home, desktop, documents, downloads)",
+        parameters={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Name or part of name to search for"
+                }
+            },
+            "required": ["name"]
+        },
+        function=find_file_or_folder
+    ))
+    
+    registry.register(Tool(
+        name="run_code",
+        description="Execute Python code and return the output. Useful for running scripts to generate files, process data, etc.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "Python code to execute"
+                },
+                "language": {
+                    "type": "string",
+                    "description": "Programming language (only 'python' supported)",
+                    "default": "python"
+                }
+            },
+            "required": ["code"]
+        },
+        function=run_code
+    ))
+    
+    registry.register(Tool(
+        name="read_skill_reference",
+        description="Read a reference file from a skill's directory (e.g., references/api_docs.md). Use this to access additional documentation or examples.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "skill_name": {
+                    "type": "string",
+                    "description": "Name of the skill (e.g., 'pdf', 'code-helper')"
+                },
+                "reference_path": {
+                    "type": "string",
+                    "description": "Path to reference file relative to skill directory (e.g., 'references/examples.md')"
+                }
+            },
+            "required": ["skill_name", "reference_path"]
+        },
+        function=read_skill_reference
+    ))
+    
+    registry.register(Tool(
+        name="install_package",
+        description="Install a Python package using pip. This will prompt the user for confirmation before installing. Use this when you encounter 'ModuleNotFoundError' or need a specific Python library.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "package_name": {
+                    "type": "string",
+                    "description": "Name of the Python package to install (e.g., 'python-pptx', 'requests', 'pandas')"
+                }
+            },
+            "required": ["package_name"]
+        },
+        function=install_package
+    ))
+    
+    registry.register(Tool(
+        name="install_npm_package",
+        description="Install an npm package in a Node.js/React project. Use this when you encounter missing npm packages or need JavaScript libraries. This will prompt the user for confirmation before installing.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "package_name": {
+                    "type": "string",
+                    "description": "Name of the npm package to install (e.g., 'react-router-dom', 'axios', 'bootstrap')"
+                },
+                "directory": {
+                    "type": "string",
+                    "description": "Path to the project directory (default: current directory)",
+                    "default": "."
+                }
+            },
+            "required": ["package_name"]
+        },
+        function=install_npm_package
+    ))
+    
+    registry.register(Tool(
+        name="run_dev_server",
+        description="Install dependencies and start a development server. Use this after creating a web project to run it. The server will run until the user presses Ctrl+C. Automatically runs npm install first. IMPORTANT: Use 'npm run dev' for Vite projects, 'npm start' for Create React App projects. Check package.json scripts to determine the correct command.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "directory": {
+                    "type": "string",
+                    "description": "Path to the project directory (e.g., 'my-react-app')"
+                },
+                "install_command": {
+                    "type": "string",
+                    "description": "Command to install dependencies (default: 'npm install')",
+                    "default": "npm install"
+                },
+                "dev_command": {
+                    "type": "string",
+                    "description": "Command to start dev server. Use 'npm run dev' for Vite, 'npm start' for Create React App (default: 'npm run dev')",
+                    "default": "npm run dev"
+                }
+            },
+            "required": ["directory"]
+        },
+        function=run_dev_server
+    ))
+    
+    return registry

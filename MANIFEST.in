@@ -1,0 +1,5 @@
+include README.md
+include LICENSE
+include SKILLS_IMPLEMENTATION.md
+recursive-include skills *.md *.py
+graft skills
