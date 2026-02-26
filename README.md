@@ -1,10 +1,17 @@
 # Zeer
 
-**Zeer** is an OpenSource agentic AI CLI that connects to multiple providers (OpenAI, Gemini, Claude) with **tool-calling capabilities** and an **extensible skills system**.  
+[![PyPI version](https://img.shields.io/pypi/v/zeer?color=blue&label=pypi)](https://pypi.org/project/zeer/)
+[![Python](https://img.shields.io/pypi/pyversions/zeer?color=blue)](https://pypi.org/project/zeer/)
+[![License](https://img.shields.io/github/license/muhdaliyan/zeer?color=green)](https://github.com/muhdaliyan/zeer/blob/main/LICENSE)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Downloads](https://img.shields.io/pypi/dm/zeer?color=blue)](https://pypi.org/project/zeer/)
+[![GitHub stars](https://img.shields.io/github/stars/muhdaliyan/zeer?style=social)](https://github.com/muhdaliyan/zeer)
+
+**Zeer** is an OpenSource agentic AI CLI that connects to multiple providers (OpenAI, Gemini, Claude, Ollama) with **tool-calling capabilities** and an **extensible skills system**.  
 
 Think of it as **Claude Code for the terminal**, provider-agnostic and developer-friendly.
 
-<img src="https://i.ibb.co/7NpbpPhw/image.png" alt="image" border="0">
+<img src="https://i.ibb.co/sxRF8qQ/image.png" alt="image" border="0">
 
 ---
 
@@ -19,9 +26,11 @@ Tools like Claude Code, Kiro, and Cursor are powerful but come with limitations:
 **Zeer is different:**
 
 * ✅ **Use Your Own API Keys** – Pay only for what you use, no subscriptions
-* ✅ **Multi-Provider Support** – Switch between OpenAI, Gemini, Claude, or add your own
+* ✅ **Multi-Provider Support** – Switch between OpenAI, Gemini, Claude, Ollama, or add your own
+* ✅ **Local AI Support** – Run models locally with Ollama (no API key required)
 * ✅ **100% Open Source** – Customize, extend, and contribute freely
 * ✅ **Extensible Skills System** – Create custom agent behaviors without code changes
+* ✅ **Background Process Management** – Start and manage dev servers in the background
 * ✅ **Terminal-First** – Lightweight, fast, and integrates with your workflow
 
 > **Note:** Zeer is currently in beta. We appreciate your contributions and feedback as we continue to improve. This project will always remain open source.
@@ -81,13 +90,77 @@ zeer
 > set up a new React project structure
 > read and summarize config.json
 
+# Start dev servers in background
+> start a React dev server on port 3000
+> run the Flask app in the background
+
 # Commands
 /skills    # View available skills
 /tools     # View available tools
+/processes # View running background processes
 /clear     # Clear conversation
 /providers # Switch provider
 /models    # Switch model
 ```
+
+---
+
+## 🤖 AI Providers
+
+Zeer supports multiple AI providers:
+
+### Cloud Providers (API Key Required)
+* **OpenAI** – GPT-4, GPT-3.5, and more
+* **Gemini** – Google's AI models
+* **Claude** – Anthropic's Claude models
+* **Ollama Cloud** – Cloud-hosted Ollama models
+
+### Local Provider (No API Key)
+* **Ollama Local** – Run AI models entirely on your machine
+  * No internet required
+  * No API costs
+  * Full privacy
+  * See [OLLAMA_SETUP.md](OLLAMA_SETUP.md) for setup guide
+
+---
+
+## 🚀 Ollama Quick Start
+
+Want to run AI locally without API keys?
+
+1. Install Ollama from [ollama.ai](https://ollama.ai)
+2. Pull a model: `ollama pull llama3.2`
+3. Start Zeer: `zeer`
+4. Select "Ollama" provider
+5. Press Enter (skip API key for local)
+6. Choose your model and start chatting
+
+See [OLLAMA_SETUP.md](OLLAMA_SETUP.md) for detailed setup instructions.
+
+---
+
+## 🔄 Background Process Management
+
+Zeer can start and manage development servers in the background:
+
+```bash
+# AI automatically detects and manages servers
+> start a Next.js dev server
+> run the Django development server
+> start the Express API on port 8080
+
+# View running processes
+/processes
+
+# AI can stop processes when needed
+> stop the React dev server
+```
+
+Features:
+* Automatic URL detection
+* Output monitoring
+* Clean process termination
+* Multiple concurrent servers
 
 ---
 
@@ -175,7 +248,8 @@ zeer/
 ## ⚙️ Requirements
 
 * Python 3.8+
-* API key for at least one provider (OpenAI, Gemini, or Claude)
+* API key for at least one cloud provider (OpenAI, Gemini, or Claude)
+* OR Ollama installed for local AI (no API key needed)
 
 ---
 
