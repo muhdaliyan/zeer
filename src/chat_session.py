@@ -291,9 +291,8 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
             
             # Check if model wants to call tools
             if response.tool_calls and self.tool_registry:
-                # Clear the spinner line
-                from src.cli_interface import WIDTH
-                print("\r" + " " * WIDTH + "\r")
+                # Clear the thinking indicator line completely
+                print("\r" + " " * 100 + "\r")
                 
                 # Store tool calls for later reference
                 tool_call_messages = []

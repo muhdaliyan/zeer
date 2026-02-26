@@ -294,6 +294,7 @@ class AppController:
                 
                 # Create model options for selection
                 model_options = [f"{m.name} ({m.id})" for m in models]
+                model_options.append("Enter custom model ID")  # Add custom option
                 model_options.append("Skip for now")  # Add skip option
                 
                 # Use searchable prompt for model selection (better for large lists)
@@ -312,6 +313,25 @@ class AppController:
                 if selected_option == "Skip for now":
                     display_info("Skipped model selection. You can select a model later using /models command.")
                     return None
+                
+                # Check if user wants to enter custom model ID
+                if selected_option == "Enter custom model ID":
+                    print(f"\n{Fore.CYAN}Enter model ID (e.g., gemini-3.1-pro-preview):{Style.RESET_ALL}")
+                    custom_id = input("> ").strip()
+                    if custom_id:
+                        # Create a custom model object
+                        custom_model = Model(
+                            id=custom_id,
+                            name=custom_id,
+                            description="Custom model",
+                            context_window=1000000  # Default to 1M tokens
+                        )
+                        self.session_manager.store_model(custom_model.id)
+                        display_success(f"Selected custom model: {custom_model.name}")
+                        return custom_model
+                    else:
+                        display_error("Model ID cannot be empty")
+                        continue
                 
                 # Find the selected model
                 selected_idx = model_options.index(selected_option)
@@ -363,6 +383,11 @@ class AppController:
         Requirements: 6.1, 6.5, 6.6
         """
         from colorama import Fore, Style
+        import time
+        
+        # Track last Ctrl+C time for double-press exit
+        last_ctrl_c_time = 0
+        ctrl_c_timeout = 2.0  # 2 seconds to press again
         
         if show_welcome:
             display_separator()
@@ -440,6 +465,14 @@ class AppController:
                                 display_error("No provider selected. Please select a provider first.")
                                 print(f"\n{Fore.YELLOW}Use {Fore.CYAN}/providers{Fore.YELLOW} command to select a provider.{Style.RESET_ALL}\n")
                                 continue
+                            
+                            # Confirm if there's an existing chat session
+                            if self.chat_session and self.chat_session.get_message_count() > 2:  # More than system messages
+                                print(f"{Fore.YELLOW}⚠ Warning: Changing models will clear your current chat session.{Style.RESET_ALL}")
+                                confirm = input(f"{Fore.CYAN}Continue? (y/n):{Style.RESET_ALL} ").strip().lower()
+                                if confirm != 'y' and confirm != 'yes':
+                                    display_info("Cancelled. Keeping current model.")
+                                    continue
                             
                             model = self._select_model()
                             if model:
@@ -588,9 +621,33 @@ class AppController:
                 print(f"\n{Fore.YELLOW}You can try again or use /help for commands.{Style.RESET_ALL}\n")
                     
             except KeyboardInterrupt:
-                # Only exit if Ctrl+C pressed when not thinking
-                print(f"\n\n{Fore.CYAN}Exiting chat...{Style.RESET_ALL}")
-                break
+                # Double Ctrl+C to exit
+                current_time = time.time()
+                if current_time - last_ctrl_c_time < ctrl_c_timeout:
+                    # Second Ctrl+C within timeout - exit
+                    print(f"\n\n{Fore.CYAN}Exiting chat...{Style.RESET_ALL}")
+                    break
+                else:
+                    # First Ctrl+C - show temporary message below input area
+                    last_ctrl_c_time = current_time
+                    import sys
+                    
+                    # Show message
+                    sys.stdout.write(f"\n{Fore.YELLOW}Press Ctrl+C again within 2 seconds to exit{Style.RESET_ALL}")
+                    sys.stdout.flush()
+                    
+                    # Wait 2 seconds
+                    time.sleep(2.0)
+                    
+                    # Clear the message line
+                    sys.stdout.write('\r' + ' ' * 100 + '\r')  # Clear line
+                    sys.stdout.write('\033[F')  # Move up one line
+                    sys.stdout.write('\r' + ' ' * 100 + '\r')  # Clear that line too
+                    sys.stdout.flush()
+                    
+                    # Reset the timer since 2 seconds passed
+                    last_ctrl_c_time = 0
+                    continue
                 
             except Exception as e:
                 display_error(f"Error during chat: {str(e)}")

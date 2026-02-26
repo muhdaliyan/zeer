@@ -97,12 +97,19 @@ class GeminiProvider(AIProvider):
                 for tool_call in tool_calls:
                     func_name = tool_call["function"]["name"]
                     func_args = json.loads(tool_call["function"]["arguments"])
-                    parts.append({
+                    
+                    part = {
                         "functionCall": {
                             "name": func_name,
                             "args": func_args
                         }
-                    })
+                    }
+                    
+                    # Add thought_signature if present (required for Gemini 3+)
+                    if "thought_signature" in tool_call:
+                        part["thoughtSignature"] = tool_call["thought_signature"]
+                    
+                    parts.append(part)
                 
                 contents.append({
                     "role": "model",
@@ -201,14 +208,24 @@ class GeminiProvider(AIProvider):
                 # Gemini wants to call a function
                 func_call = part["functionCall"]
                 func_name = func_call["name"]
-                function_calls.append({
+                
+                # Extract thought_signature if present (required for Gemini 3+)
+                thought_signature = part.get("thoughtSignature")
+                
+                function_call_obj = {
                     "id": f"call_{func_name}",  # Use function name in ID for tracking
                     "type": "function",
                     "function": {
                         "name": func_name,
                         "arguments": json.dumps(func_call.get("args", {}))
                     }
-                })
+                }
+                
+                # Store thought_signature if present (needed for next turn)
+                if thought_signature:
+                    function_call_obj["thought_signature"] = thought_signature
+                
+                function_calls.append(function_call_obj)
             elif "text" in part:
                 text_content += part["text"]
         

@@ -956,10 +956,10 @@ def display_input_prompt_with_slash_detection() -> tuple:
         # Print separator BEFORE input (no extra spacing)
         console.print(f"[dim]{'─' * WIDTH}[/dim]")
         
-        # Show attached files if any
+        # Show attached files if any with removal option
         if files_attached:
             for idx, filepath in enumerate(files_attached, 1):
-                print(f"{Fore.CYAN}File attached {idx}:{Style.RESET_ALL} {filepath}")
+                print(f"{Fore.CYAN}File {idx}:{Style.RESET_ALL} {filepath} {Fore.LIGHTBLACK_EX}(Press Ctrl+{idx} to remove){Style.RESET_ALL}")
         
         # Custom style for prompt
         prompt_style = PromptStyle.from_dict({
@@ -1008,11 +1008,36 @@ def display_input_prompt_with_slash_detection() -> tuple:
             # If not triggered, insert @ normally
             buffer.insert_text('@')
         
+        # Add key bindings to remove attached files (Ctrl+1, Ctrl+2, etc)
+        for i in range(1, 10):
+            @kb.add(f'c-{i}')
+            def _(event, file_idx=i):
+                """Remove attached file."""
+                if file_idx <= len(files_attached):
+                    saved_text = event.app.current_buffer.text
+                    event.app.exit(result=f'__REMOVE_FILE__|||{file_idx}|||{saved_text}')
+        
         # Build toolbar text
         toolbar_parts = ['Press / for commands', '@ for files']
         if files_attached:
             toolbar_parts.append(f'{len(files_attached)} file(s) attached')
+            toolbar_parts.append('Ctrl+# to remove')
         toolbar_text = ' • '.join(toolbar_parts)
+        
+        # Create bottom toolbar with separator and minimal spacing
+        from prompt_toolkit.formatted_text import HTML as PTK_HTML
+        separator_line = '─' * WIDTH
+        
+        def get_bottom_toolbar():
+            # Add just 2 empty lines for minimal spacing
+            return PTK_HTML(f'<ansibrightblack>{separator_line}</ansibrightblack>\n<ansibrightblack>{toolbar_text}</ansibrightblack>\n\n\n\n\n\n\n\n\n\n\n\n')
+        
+        # Custom style to remove white background
+        custom_prompt_style = PromptStyle.from_dict({
+            'prompt': 'cyan',
+            'placeholder': 'ansibrightblack',
+            'bottom-toolbar': 'noreverse',  # Remove reverse video (white background)
+        })
         
         try:
             # Get input with default text
@@ -1020,17 +1045,23 @@ def display_input_prompt_with_slash_detection() -> tuple:
                 '> ',
                 completer=CommandCompleter(),
                 complete_while_typing=True,
-                style=prompt_style,
+                style=custom_prompt_style,
                 placeholder=HTML('<style color="#808080">Type your message here...</style>'),
-                bottom_toolbar=toolbar_text,
+                bottom_toolbar=get_bottom_toolbar,
                 key_bindings=kb,
-                default=default_text
+                default=default_text,
+                reserve_space_for_menu=0  # Don't reserve extra space
             )
+            
+            # Print separator AFTER input (right below it)
+            console.print(f"[dim]{'─' * WIDTH}[/dim]")
             
             # Don't strip yet - return as is
             return user_input
             
         except (KeyboardInterrupt, EOFError):
+            # Print separator even on cancel
+            console.print(f"[dim]{'─' * WIDTH}[/dim]")
             return None
     
     # Main loop to handle input
@@ -1038,8 +1069,8 @@ def display_input_prompt_with_slash_detection() -> tuple:
         user_input = show_input_prompt(current_text, attached_files)
         
         if user_input is None:
-            print()
-            return "", False
+            # Ctrl+C or EOF pressed - raise KeyboardInterrupt to let caller handle it
+            raise KeyboardInterrupt
         
         # Check if user pressed /
         if user_input == '__SHOW_COMMANDS__':
@@ -1057,6 +1088,30 @@ def display_input_prompt_with_slash_detection() -> tuple:
             # Show searchable command palette
             command = prompt_slash_command()
             return command, True
+        
+        # Check if user wants to remove a file
+        if user_input.startswith('__REMOVE_FILE__|||'):
+            parts = user_input.split('|||')
+            file_idx = int(parts[1])
+            current_text = parts[2] if len(parts) > 2 else ""
+            
+            # Remove the file
+            if 1 <= file_idx <= len(attached_files):
+                removed_file = attached_files.pop(file_idx - 1)
+                
+                # Clear the input area
+                import sys
+                lines_to_clear = 2 + file_idx  # separator + input + files
+                
+                for _ in range(lines_to_clear):
+                    sys.stdout.write('\033[F')  # Move up
+                    sys.stdout.write('\033[K')  # Clear line
+                sys.stdout.flush()
+                
+                print(f"{Fore.YELLOW}✓ Removed: {removed_file}{Style.RESET_ALL}")
+            
+            # Continue to show input
+            continue
         
         # Check if user pressed @
         if user_input.startswith('__SHOW_FILES__|||'):
@@ -1094,8 +1149,8 @@ def display_input_prompt_with_slash_detection() -> tuple:
             if match:
                 user_input = match
         
-        # Print bottom separator after input
-        console.print(f"[dim]{'─' * WIDTH}[/dim]\n")
+        # Separator already printed by show_input_prompt
+        print()  # Just add a newline for spacing
         
         # If we have attached files, build the full message
         if attached_files:
@@ -1111,6 +1166,8 @@ def display_input_prompt_with_slash_detection() -> tuple:
             # Combine file references with user message
             if file_references:
                 full_message = '\n'.join(file_references) + '\n' + user_input
+                # Clear attached files after sending
+                attached_files.clear()
                 return full_message, False
         
         return user_input, False
@@ -1138,8 +1195,10 @@ def display_assistant_message(
     elapsed_time: float = 0,
     context_window: Optional[int] = None,
 ) -> None:
-    """Display assistant message with rich formatting and proper width."""
+    """Display assistant message with typewriter effect and markdown rendering."""
     import shutil
+    import sys
+    import re
     
     # Get terminal width and set console width
     term_width = shutil.get_terminal_size().columns
@@ -1149,10 +1208,88 @@ def display_assistant_message(
     from rich.console import Console
     display_console = Console(width=max_width)
     
-    # Use rich to render markdown
-    md = Markdown(message)
-    display_console.print(md)
-    display_console.print()
+    # Strip ALL ANSI codes from the message (more comprehensive regex)
+    ansi_escape = re.compile(r'\x1b\[[0-9;]*m|\[0m|\[3[0-9]m|\[9[0-9]m|\[1m|\[4m')
+    clean_message = ansi_escape.sub('', message)
+    
+    # Parse markdown formatting and apply colors
+    def format_text_with_colors(text):
+        """Convert markdown to colored terminal output with smart styling."""
+        # Replace **bold** with cyan color
+        text = re.sub(r'\*\*([^*]+)\*\*', f'{Fore.CYAN}\\1{Style.RESET_ALL}', text)
+        
+        # Replace `code` with yellow
+        text = re.sub(r'`([^`]+)`', f'{Fore.YELLOW}\\1{Style.RESET_ALL}', text)
+        
+        # Handle bullet points - make them cyan
+        text = re.sub(r'^\*\s+', f'{Fore.CYAN}• {Style.RESET_ALL}', text, flags=re.MULTILINE)
+        text = re.sub(r'^\-\s+', f'{Fore.CYAN}• {Style.RESET_ALL}', text, flags=re.MULTILINE)
+        
+        # Color numbered lists (1. 2. 3. etc) - make numbers cyan
+        text = re.sub(r'^(\d+)\.\s+', f'{Fore.CYAN}\\1.{Style.RESET_ALL} ', text, flags=re.MULTILINE)
+        
+        # Color section headers (lines ending with colon that start a new concept)
+        # Like "Here's why directories are important:"
+        text = re.sub(r'^([A-Z][^:]+:)$', f'{Fore.MAGENTA}\\1{Style.RESET_ALL}', text, flags=re.MULTILINE)
+        
+        # Color file extensions (.py, .js, .json, etc)
+        text = re.sub(r'(\.[a-z]{2,4})\b', f'{Fore.YELLOW}\\1{Style.RESET_ALL}', text)
+        
+        # Color paths (things with / or \ that look like file paths)
+        text = re.sub(r'(/[a-zA-Z0-9_/.-]+)', f'{Fore.YELLOW}\\1{Style.RESET_ALL}', text)
+        
+        # Color common directory/file names
+        text = re.sub(r'\b(__pycache__|node_modules|\.git|dist|build)\b', 
+                     f'{Fore.MAGENTA}\\1{Style.RESET_ALL}', text)
+        
+        return text
+    
+    # Format the message
+    formatted_message = format_text_with_colors(clean_message)
+    
+    # Calculate delay to fit within 5 seconds max
+    message_length = len(clean_message)
+    max_duration = 5.0  # 5 seconds max
+    
+    if message_length > 0:
+        # Calculate delay per character to fit in 5 seconds
+        delay_per_char = max_duration / message_length
+        # Cap minimum at 0.001s (1ms) and maximum at 0.01s (10ms)
+        delay_per_char = max(0.001, min(delay_per_char, 0.01))
+    else:
+        delay_per_char = 0.005
+    
+    # Typewriter effect - print character by character
+    i = 0
+    start_time = time.time()
+    
+    while i < len(formatted_message):
+        # Check if we've exceeded 5 seconds - if so, print the rest instantly
+        if time.time() - start_time > max_duration:
+            sys.stdout.write(formatted_message[i:])
+            sys.stdout.flush()
+            break
+        
+        char = formatted_message[i]
+        
+        # Check if this is the start of an ANSI escape sequence
+        if char == '\x1b' and i + 1 < len(formatted_message) and formatted_message[i + 1] == '[':
+            # Find the end of the ANSI sequence (ends with 'm')
+            end = i + 2
+            while end < len(formatted_message) and formatted_message[end] != 'm':
+                end += 1
+            # Print the entire ANSI sequence at once (no delay)
+            sys.stdout.write(formatted_message[i:end + 1])
+            sys.stdout.flush()
+            i = end + 1
+        else:
+            # Regular character - print with delay
+            sys.stdout.write(char)
+            sys.stdout.flush()
+            time.sleep(delay_per_char)
+            i += 1
+    
+    print("\n")  # New line after message
     
     # Build metadata line - all grey
     metadata_parts = []
@@ -1174,8 +1311,8 @@ def display_assistant_message(
             # Show token count if no context window available
             metadata_parts.append(f"{prompt_tokens:,} context tokens")
     
-    display_console.print(f"[dim]{' • '.join(metadata_parts)}[/dim]")
-    display_console.print(f"[dim]{'─' * max_width}[/dim]\n")
+    display_console.print(f"[dim]{' • '.join(metadata_parts)}[/dim]\n")
+
 
 
 def format_message_with_code_blocks(message: str) -> str:
@@ -1233,7 +1370,8 @@ class RunningIndicator:
             self.thread.join(timeout=0.5)
 
         elapsed = time.time() - self.start_time
-        print("\r" + " " * WIDTH + "\r", end="", flush=True)
+        # Clear the thinking line completely
+        print("\r" + " " * 100 + "\r", end="", flush=True)
         return elapsed
     
     def is_cancelled(self) -> bool:
