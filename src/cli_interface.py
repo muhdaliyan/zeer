@@ -36,6 +36,7 @@ class CommandCompleter(Completer):
             "/reset": "Reset everything",
             "/skills": "List agent skills",
             "/tools": "List available tools",
+            "/servers": "Show running servers",
             "/mode": "Toggle execution mode",
             "/exit": "Exit application",
             "/help": "Show help"
@@ -58,7 +59,7 @@ class CommandCompleter(Completer):
 
 def get_command_match(text: str) -> Optional[str]:
     """Get the first matching command for auto-completion."""
-    commands = ["/models", "/providers", "/clear", "/reset", "/skills", "/tools", "/mode", "/exit", "/help"]
+    commands = ["/models", "/providers", "/clear", "/reset", "/skills", "/tools", "/servers", "/mode", "/exit", "/help"]
     
     if text.startswith('/') and len(text) > 1:
         for cmd in commands:
@@ -531,6 +532,7 @@ def prompt_slash_command() -> str:
         "/reset - Reset everything",
         "/skills - List agent skills",
         "/tools - List available tools",
+        "/servers - Show running servers",
         "/mode - Toggle execution mode",
         "/exit - Exit application",
         "/help - Show help",
@@ -1144,7 +1146,7 @@ def display_input_prompt_with_slash_detection() -> tuple:
         user_input = user_input.strip()
         
         # Auto-complete if it's a partial command match
-        if user_input.startswith('/') and user_input not in ["/models", "/providers", "/clear", "/reset", "/skills", "/tools", "/exit", "/help", "/mode"]:
+        if user_input.startswith('/') and user_input not in ["/models", "/providers", "/clear", "/reset", "/skills", "/tools", "/servers", "/exit", "/help", "/mode"]:
             match = get_command_match(user_input)
             if match:
                 user_input = match

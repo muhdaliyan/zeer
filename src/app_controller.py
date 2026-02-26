@@ -30,6 +30,7 @@ from src.providers.openai_provider import OpenAIProvider
 from src.providers.gemini_provider import GeminiProvider
 from src.providers.claude_provider import ClaudeProvider
 from src.providers.openrouter_provider import OpenRouterProvider
+from src.providers.ollama_provider import OllamaProvider
 from src.tools import create_default_registry, ToolRegistry
 from src.skills_manager import SkillsManager
 
@@ -49,7 +50,8 @@ class AppController:
         "openai": {"name": "OpenAI", "class": OpenAIProvider},
         "gemini": {"name": "Gemini", "class": GeminiProvider},
         "claude": {"name": "Claude", "class": ClaudeProvider},
-        "openrouter": {"name": "OpenRouter", "class": OpenRouterProvider}
+        "openrouter": {"name": "OpenRouter", "class": OpenRouterProvider},
+        "ollama": {"name": "Ollama", "class": OllamaProvider}
     }
     
     def __init__(self):
@@ -108,6 +110,15 @@ class AppController:
                         print(f" with model {Fore.MAGENTA}{saved_model}{Style.RESET_ALL}")
                     else:
                         print()
+                    
+                    # For Ollama, empty string is valid (local usage)
+                    if provider_name == "ollama" and api_key == "":
+                        pass  # Empty key is valid for local Ollama
+                    elif not api_key:
+                        # Invalid saved data for other providers
+                        provider_name = None
+                    else:
+                        print()
                 else:
                     provider_name = None  # Invalid saved data
             
@@ -124,10 +135,18 @@ class AppController:
                     return
             
             # API key input flow (if not using saved)
-            if not api_key:
-                api_key = self._input_api_key()
-                if not api_key:
-                    return
+            # Ollama doesn't require API key for local usage
+            if api_key is None:  # Check for None, empty string is valid for Ollama
+                if provider_name == "ollama":
+                    # For Ollama, API key is optional (local usage)
+                    api_key = self._input_api_key_optional()
+                    if api_key is None:  # User cancelled
+                        return
+                    # Empty string is valid for local Ollama
+                else:
+                    api_key = self._input_api_key()
+                    if not api_key:
+                        return
             
             # Initialize provider
             self.provider = self._initialize_provider(provider_name, api_key)
@@ -248,6 +267,34 @@ class AppController:
                 print("\n\nExiting...")
                 return None
     
+    def _input_api_key_optional(self) -> Optional[str]:
+        """
+        Handle optional API key input for Ollama (can be empty for local usage).
+        
+        Returns:
+            API key (can be empty string for local), or None if user exits
+        """
+        from colorama import Fore, Style
+        
+        try:
+            print(f"\n{Fore.YELLOW}Ollama API key (press Enter to skip for local usage):{Style.RESET_ALL}")
+            print(f"{Fore.LIGHTBLACK_EX}Leave blank to use local Ollama server at http://localhost:11434{Style.RESET_ALL}")
+            api_key = input(f"{Fore.CYAN}API Key (optional):{Style.RESET_ALL} ").strip()
+            
+            if api_key:
+                self.session_manager.store_api_key(api_key, "ollama")
+                display_success("API key saved for Ollama cloud")
+            else:
+                # Empty key is valid for local Ollama
+                self.session_manager.store_api_key("", "ollama")
+                display_success("Using local Ollama server")
+            
+            return api_key  # Can be empty string
+            
+        except KeyboardInterrupt:
+            print("\n\nExiting...")
+            return None
+    
     def _initialize_provider(self, provider_name: str, api_key: str) -> Optional[AIProvider]:
         """
         Create and initialize a provider instance.
@@ -262,10 +309,84 @@ class AppController:
         try:
             provider_class = self.PROVIDERS[provider_name]["class"]
             provider = provider_class(api_key)
+            
+            # For Ollama, check connection immediately and show helpful message
+            if provider_name == "ollama":
+                self._check_ollama_connection(provider)
+            
             return provider
         except Exception as e:
             display_error(f"Failed to initialize provider: {str(e)}")
             return None
+    
+    def _check_ollama_connection(self, provider) -> None:
+        """
+        Check Ollama connection and show helpful setup messages.
+        
+        Args:
+            provider: The Ollama provider instance
+            
+        Raises:
+            Exception: If connection fails with helpful instructions
+        """
+        from colorama import Fore, Style
+        from src.cli_interface import RunningIndicator
+        
+        # Show connecting indicator
+        indicator = RunningIndicator()
+        indicator.start()
+        
+        try:
+            # Try to connect and list models
+            asyncio.run(provider.validate_api_key())
+            
+            # Check if any models are available
+            models = asyncio.run(provider.get_models())
+            
+            indicator.stop()
+            
+            if models:
+                display_success(f"Connected to Ollama • {len(models)} model(s) available")
+            else:
+                # No models found
+                print(f"\n{Fore.YELLOW}⚠ Ollama is running but no models found{Style.RESET_ALL}\n")
+                print(f"{Fore.CYAN}Pull a model to get started:{Style.RESET_ALL}")
+                print(f"  {Fore.WHITE}1. ollama pull llama3.2{Style.RESET_ALL}")
+                print(f"  {Fore.WHITE}2. ollama pull mistral{Style.RESET_ALL}")
+                print(f"  {Fore.WHITE}3. ollama pull codellama{Style.RESET_ALL}")
+                print(f"\n{Fore.LIGHTBLACK_EX}Browse models: https://ollama.ai/library{Style.RESET_ALL}\n")
+                raise Exception("No models available. Pull a model first.")
+                
+        except Exception as e:
+            indicator.stop()
+            error_msg = str(e).lower()
+            
+            # Connection refused - Ollama not running
+            if "connection" in error_msg or "refused" in error_msg:
+                print(f"\n{Fore.YELLOW}⚠ Ollama is not installed or not running{Style.RESET_ALL}\n")
+                print(f"{Fore.CYAN}Setup:{Style.RESET_ALL}")
+                print(f"  {Fore.WHITE}1. Download and install Ollama from: {Fore.BLUE}https://ollama.ai{Style.RESET_ALL}")
+                print(f"  {Fore.WHITE}2. Open the Ollama app (it will start automatically){Style.RESET_ALL}")
+                print(f"  {Fore.WHITE}3. Pull a model: {Fore.GREEN}ollama pull llama3.2{Style.RESET_ALL}")
+                print(f"  {Fore.WHITE}4. Restart zeer and select Ollama{Style.RESET_ALL}\n")
+                raise Exception("Ollama not installed or not running.")
+            
+            # Unauthorized - needs login for cloud models
+            elif "unauthorized" in error_msg or "authentication" in error_msg or "ollama_error" in error_msg:
+                print(f"\n{Fore.YELLOW}⚠ Authentication required{Style.RESET_ALL}\n")
+                print(f"{Fore.CYAN}To use cloud models:{Style.RESET_ALL}")
+                print(f"  {Fore.WHITE}1. Download and install Ollama: {Fore.BLUE}https://ollama.ai{Style.RESET_ALL}")
+                print(f"  {Fore.WHITE}2. Open Ollama app and sign in{Style.RESET_ALL}")
+                print(f"  {Fore.WHITE}3. Restart zeer and select Ollama{Style.RESET_ALL}\n")
+                raise Exception("Please install Ollama app and sign in.")
+            
+            # No models available
+            elif "no models" in error_msg:
+                raise e
+            
+            # Other errors
+            else:
+                raise e
     
     def _select_model(self) -> Optional[Model]:
         """
@@ -293,9 +414,26 @@ class AppController:
                     return None
                 
                 # Create model options for selection
-                model_options = [f"{m.name} ({m.id})" for m in models]
-                model_options.append("Enter custom model ID")  # Add custom option
-                model_options.append("Skip for now")  # Add skip option
+                # Put custom option at the top in purple
+                model_options = []
+                
+                # Add custom model option at the top (will be colored in the UI)
+                from colorama import Fore, Style
+                model_options.append(f"{Fore.MAGENTA}Enter custom model ID{Style.RESET_ALL}")
+                
+                # For Ollama, name and id are the same, so show description if available
+                for m in models:
+                    if m.name == m.id:
+                        # Same name and id (like Ollama), show with description if available
+                        if m.description:
+                            model_options.append(f"{m.id} - {m.description}")
+                        else:
+                            model_options.append(m.id)
+                    else:
+                        # Different name and id (like other providers)
+                        model_options.append(f"{m.name} ({m.id})")
+                
+                model_options.append("Skip for now")  # Add skip option at the end
                 
                 # Use searchable prompt for model selection (better for large lists)
                 from src.cli_interface import prompt_searchable_choice
@@ -314,11 +452,78 @@ class AppController:
                     display_info("Skipped model selection. You can select a model later using /models command.")
                     return None
                 
-                # Check if user wants to enter custom model ID
-                if selected_option == "Enter custom model ID":
+                # Check if user wants to enter custom model ID (strip color codes for comparison)
+                if "Enter custom model ID" in selected_option:
                     print(f"\n{Fore.CYAN}Enter model ID (e.g., gemini-3.1-pro-preview):{Style.RESET_ALL}")
                     custom_id = input("> ").strip()
                     if custom_id:
+                        # Validate the model before saving
+                        provider_name = self.session_manager.get_provider()
+                        
+                        if provider_name == "ollama":
+                            # For Ollama, check if model is available using show()
+                            try:
+                                from src.cli_interface import RunningIndicator
+                                indicator = RunningIndicator()
+                                indicator.start()
+                                
+                                try:
+                                    from ollama import Client
+                                    client = Client(host="http://localhost:11434")
+                                    client.show(custom_id)
+                                    indicator.stop()
+                                    display_success(f"Model '{custom_id}' is available")
+                                except Exception as show_error:
+                                    indicator.stop()
+                                    error_msg = str(show_error).lower()
+                                    
+                                    if "not found" in error_msg or "does not exist" in error_msg:
+                                        if ":cloud" in custom_id:
+                                            print(f"\n{Fore.YELLOW}⚠ Model '{custom_id}' not available{Style.RESET_ALL}\n")
+                                            print(f"{Fore.CYAN}To use this model:{Style.RESET_ALL}")
+                                            print(f"  {Fore.WHITE}1. Run: {Fore.GREEN}ollama run {custom_id}{Style.RESET_ALL}")
+                                            print(f"  {Fore.WHITE}2. Restart zeer{Style.RESET_ALL}\n")
+                                        else:
+                                            print(f"\n{Fore.YELLOW}⚠ Model '{custom_id}' not found{Style.RESET_ALL}\n")
+                                            print(f"{Fore.CYAN}To use this model:{Style.RESET_ALL}")
+                                            print(f"  {Fore.WHITE}1. Pull: {Fore.GREEN}ollama pull {custom_id}{Style.RESET_ALL}")
+                                            print(f"  {Fore.WHITE}2. Restart zeer{Style.RESET_ALL}\n")
+                                        continue
+                            except Exception:
+                                pass
+                        
+                        elif provider_name in ["openai", "gemini", "claude", "openrouter"]:
+                            # For other providers, try a test message to validate
+                            try:
+                                from src.cli_interface import RunningIndicator
+                                indicator = RunningIndicator()
+                                indicator.start()
+                                
+                                try:
+                                    # Create a test context with minimal message
+                                    test_context = ChatContext(
+                                        messages=[Message(role="user", content="test")],
+                                        model=custom_id,
+                                        provider=provider_name
+                                    )
+                                    # Try to send a test message
+                                    asyncio.run(self.provider.send_message("test", test_context))
+                                    indicator.stop()
+                                    display_success(f"Model '{custom_id}' is available")
+                                except Exception as test_error:
+                                    indicator.stop()
+                                    error_msg = str(test_error).lower()
+                                    
+                                    if "not found" in error_msg or "does not exist" in error_msg or "invalid" in error_msg:
+                                        print(f"\n{Fore.YELLOW}⚠ Model '{custom_id}' not found{Style.RESET_ALL}\n")
+                                        print(f"{Fore.CYAN}Please check:{Style.RESET_ALL}")
+                                        print(f"  {Fore.WHITE}1. Model ID is correct{Style.RESET_ALL}")
+                                        print(f"  {Fore.WHITE}2. You have access to this model{Style.RESET_ALL}")
+                                        print(f"  {Fore.WHITE}3. Your API key has proper permissions{Style.RESET_ALL}\n")
+                                        continue
+                            except Exception:
+                                pass
+                        
                         # Create a custom model object
                         custom_model = Model(
                             id=custom_id,
@@ -333,9 +538,29 @@ class AppController:
                         display_error("Model ID cannot be empty")
                         continue
                 
-                # Find the selected model
-                selected_idx = model_options.index(selected_option)
-                selected_model = models[selected_idx]
+                # Find the selected model by matching the display text
+                selected_model = None
+                for m in models:
+                    # Check if this model matches the selected option
+                    if m.name == m.id:
+                        # Ollama format
+                        if m.description:
+                            if selected_option == f"{m.id} - {m.description}":
+                                selected_model = m
+                                break
+                        else:
+                            if selected_option == m.id:
+                                selected_model = m
+                                break
+                    else:
+                        # Other providers format
+                        if selected_option == f"{m.name} ({m.id})":
+                            selected_model = m
+                            break
+                
+                if not selected_model:
+                    display_error("Could not find selected model")
+                    continue
                 
                 self.session_manager.store_model(selected_model.id)
                 display_success(f"Selected model: {selected_model.name}")
@@ -483,7 +708,6 @@ class AppController:
                                     self.session_manager.get_api_key(),
                                     model.id
                                 )
-                                display_success("Switched to new model. Conversation history cleared.")
                         except KeyboardInterrupt:
                             # ESC pressed - go back to chat
                             display_info("Cancelled. Returning to chat...")
@@ -497,20 +721,30 @@ class AppController:
                                 # Check if we already have API key for this provider in memory or saved
                                 api_key = self.session_manager.get_api_key(provider_name)
                                 
-                                if not api_key:
+                                # For Ollama, empty string is valid (local usage)
+                                has_valid_key = (provider_name == "ollama" and api_key == "") or (api_key and api_key.strip())
+                                
+                                if not has_valid_key:
                                     # Check saved credentials
                                     saved_creds = self.session_manager.load_saved_credentials()
                                     if saved_creds and 'providers' in saved_creds and provider_name in saved_creds['providers']:
                                         api_key = saved_creds['providers'][provider_name].get('api_key')
-                                        if api_key:
+                                        if api_key or (provider_name == "ollama" and api_key == ""):
                                             self.session_manager.store_api_key(api_key, provider_name)
                                             display_success(f"Using saved API key for {self.PROVIDERS[provider_name]['name']}")
+                                            has_valid_key = True
                                 
-                                if not api_key:
-                                    # Ask for API key
-                                    api_key = self._input_api_key()
+                                if not has_valid_key:
+                                    # Ask for API key (optional for Ollama)
+                                    if provider_name == "ollama":
+                                        api_key = self._input_api_key_optional()
+                                        if api_key is None:  # User cancelled
+                                            continue
+                                        # Empty string is valid for local Ollama
+                                    else:
+                                        api_key = self._input_api_key()
                                 
-                                if api_key:
+                                if api_key is not None:  # Check for None (cancelled), empty string is valid for Ollama
                                     self.provider = self._initialize_provider(provider_name, api_key)
                                     if self.provider:
                                         model = self._select_model()
@@ -518,7 +752,6 @@ class AppController:
                                             self.chat_session = ChatSession(self.provider, model.id, model.context_window, self.tool_registry, self.skills_manager)
                                             # Save new credentials
                                             self.session_manager.save_credentials(provider_name, api_key, model.id)
-                                            display_success("Switched to new provider. Conversation history cleared.")
                         except KeyboardInterrupt:
                             # ESC pressed - go back to chat
                             display_info("Cancelled. Returning to chat...")
@@ -532,6 +765,7 @@ class AppController:
                         print(f"  {Fore.YELLOW}/reset{Style.RESET_ALL}     - Reset everything (history + saved credentials)")
                         print(f"  {Fore.YELLOW}/skills{Style.RESET_ALL}    - List available agent skills")
                         print(f"  {Fore.YELLOW}/tools{Style.RESET_ALL}     - List available tools")
+                        print(f"  {Fore.YELLOW}/servers{Style.RESET_ALL}   - Show running background servers")
                         print(f"  {Fore.YELLOW}/mode{Style.RESET_ALL}      - Toggle execution mode (deliberate/fast)")
                         print(f"  {Fore.YELLOW}/exit{Style.RESET_ALL}      - Exit the application")
                         print(f"  {Fore.YELLOW}/help{Style.RESET_ALL}      - Show this help message")
@@ -544,6 +778,10 @@ class AppController:
                     
                     elif command == '/tools':
                         self._display_tools()
+                        continue
+                    
+                    elif command == '/servers':
+                        self._display_servers()
                         continue
                     
                     elif command == '/mode':
@@ -577,8 +815,8 @@ class AppController:
                 indicator.start()
                 
                 try:
-                    # Send message and get response
-                    response = asyncio.run(self.chat_session.send_message(user_message))
+                    # Send message and get response (pass indicator for control during tool execution)
+                    response = asyncio.run(self.chat_session.send_message(user_message, indicator))
                     
                     # Stop indicator and get elapsed time
                     elapsed_time = indicator.stop()
@@ -650,7 +888,7 @@ class AppController:
                     continue
                 
             except Exception as e:
-                display_error(f"Error during chat: {str(e)}")
+                display_error(str(e))
                 # Make all errors recoverable - don't exit
                 print(f"\n{Fore.YELLOW}You can continue chatting or use /help for commands.{Style.RESET_ALL}\n")
     
@@ -708,6 +946,54 @@ class AppController:
         console.print()
         console.print(f"[dim]Total: {len(tools)} tools available[/dim]\n")
         print(f"{Fore.LIGHTBLACK_EX}Tools can be called by AI agents during conversations{Style.RESET_ALL}\n")
+    
+    def _display_servers(self) -> None:
+        """Display running background servers."""
+        from rich.table import Table
+        from rich.console import Console
+        from src.process_manager import get_process_manager
+        
+        console = Console()
+        manager = get_process_manager()
+        processes = manager.list_processes()
+        
+        if not processes:
+            console.print()
+            console.print(f"[yellow]No servers currently running[/yellow]\n")
+            return
+        
+        # Create table
+        table = Table(title="[cyan]Running Background Servers[/cyan]", show_header=True, header_style="bold cyan")
+        table.add_column("Name", style="yellow", width=20)
+        table.add_column("Status", style="green", width=10)
+        table.add_column("URL", style="cyan", width=30)
+        table.add_column("Started", style="white", width=15)
+        table.add_column("ID", style="dim", width=10)
+        
+        for proc in processes:
+            # Check if process is still running
+            status = "running" if proc.process.poll() is None else "stopped"
+            status_color = "green" if status == "running" else "red"
+            
+            # Format start time
+            start_time = proc.started_at.strftime('%H:%M:%S')
+            
+            # Get URL or show N/A
+            url = proc.url if proc.url else "N/A"
+            
+            table.add_row(
+                proc.name,
+                f"[{status_color}]{status}[/{status_color}]",
+                url,
+                start_time,
+                proc.id
+            )
+        
+        console.print()
+        console.print(table)
+        console.print()
+        console.print(f"[dim]Total: {len(processes)} server(s) running[/dim]")
+        console.print(f"[dim]Use 'stop server' in chat to stop a server[/dim]\n")
     
     def _toggle_execution_mode(self) -> None:
         """Toggle between deliberate and fast execution modes."""

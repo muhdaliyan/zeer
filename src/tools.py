@@ -439,12 +439,12 @@ def read_skill_reference(skill_name: str, reference_path: str) -> str:
 
 
 def run_dev_server(directory: str, install_command: str = "npm install", dev_command: str = "npm run dev") -> str:
-    """Install dependencies and start a development server in a directory."""
+    """Install dependencies and start a development server in background."""
     import subprocess
-    import threading
     import time
     from colorama import Fore, Style
-    import sys
+    from src.process_manager import get_process_manager
+    from src.tool_display import get_tool_display
     
     try:
         # Convert to absolute path
@@ -455,14 +455,11 @@ def run_dev_server(directory: str, install_command: str = "npm install", dev_com
         if not dir_path.exists():
             raise Exception(f"Directory not found: {directory}")
         
-        # Clear spinner line
-        from src.cli_interface import WIDTH
-        print("\r" + " " * WIDTH + "\r", end="", flush=True)
+        display = get_tool_display()
         
         # Step 1: Install dependencies
-        print(f"\n{Fore.CYAN}Installing dependencies in {dir_path.name}...{Style.RESET_ALL}")
+        display.console.print(f"\n[cyan]Installing dependencies in {dir_path.name}...[/cyan]")
         
-        # Use shell=True on Windows for npm commands
         install_result = subprocess.run(
             install_command,
             cwd=str(dir_path),
@@ -476,98 +473,34 @@ def run_dev_server(directory: str, install_command: str = "npm install", dev_com
             error_output = install_result.stderr or install_result.stdout
             raise Exception(f"Installation failed:\n{error_output}")
         
-        print(f"{Fore.GREEN}✓ Dependencies installed{Style.RESET_ALL}\n")
+        display.console.print(f"[green]✓ Dependencies installed[/green]\n")
         
-        # Step 2: Start dev server
-        print(f"{Fore.CYAN}Starting development server...{Style.RESET_ALL}\n")
+        # Step 2: Start dev server in background
+        display.console.print(f"[cyan]Starting development server...[/cyan]\n")
         
-        # Start the dev server in a subprocess
-        process = subprocess.Popen(
-            dev_command,
-            cwd=str(dir_path),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            shell=True
+        manager = get_process_manager()
+        bg_process = manager.start_process(
+            name=dir_path.name,
+            command=dev_command,
+            directory=str(dir_path)
         )
         
-        # Monitor output for URL and errors
-        url_found = False
-        error_detected = False
-        output_lines = []
-        server_started = False
+        # Wait a bit for server to start and detect URL
+        time.sleep(3)
         
-        def read_output():
-            nonlocal url_found, error_detected, server_started
-            for line in iter(process.stdout.readline, ''):
-                if line:
-                    output_lines.append(line)
-                    
-                    # Check for errors
-                    if 'error' in line.lower() or 'missing script' in line.lower():
-                        error_detected = True
-                    
-                    # Check if server actually started
-                    if 'localhost' in line.lower() or 'local:' in line.lower():
-                        server_started = True
-                        url_found = True
-                    
-                    # Print output in real-time
-                    print(line, end='')
+        # Show server running message
+        if bg_process.url:
+            display.show_server_running(dir_path.name, bg_process.url)
+        else:
+            display.console.print(f"\n[green]● Server started in background[/green]")
+            display.console.print(f"[dim]Process ID: {bg_process.id}[/dim]\n")
         
-        # Start output reading thread
-        output_thread = threading.Thread(target=read_output, daemon=True)
-        output_thread.start()
-        
-        # Wait for server to start or error to occur
-        wait_time = 0
-        max_wait = 10  # Wait up to 10 seconds
-        
-        while wait_time < max_wait and not server_started and not error_detected:
-            if process.poll() is not None:
-                # Process ended
-                break
-            time.sleep(0.5)
-            wait_time += 0.5
-        
-        # Check if there was an error
-        if error_detected or (process.poll() is not None and not server_started):
-            error_output = '\n'.join(output_lines[-10:])  # Last 10 lines
-            raise Exception(f"Failed to start dev server:\n{error_output}")
-        
-        if not server_started:
-            raise Exception("Dev server did not start within expected time. Check the output above for errors.")
-        
-        # Server started successfully
-        print(f"\n{Fore.GREEN}✓ Server is running!{Style.RESET_ALL}\n")
-        
-        try:
-            # Keep running until interrupted
-            while process.poll() is None:
-                time.sleep(0.5)
-        except KeyboardInterrupt:
-            pass
-        
-        # Cleanup
-        print(f"\n{Fore.CYAN}Stopping server...{Style.RESET_ALL}")
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-        
-        print(f"{Fore.GREEN}✓ Server stopped{Style.RESET_ALL}\n")
-        
-        return f"Development server ran successfully in {directory}"
+        return f"Development server for {directory} is running in background (ID: {bg_process.id})"
         
     except subprocess.TimeoutExpired:
         raise Exception("Installation timed out after 5 minutes")
-    except KeyboardInterrupt:
-        if 'process' in locals():
-            process.terminate()
-        raise Exception("Operation cancelled by user")
     except Exception as e:
+        raise Exception(str(e))
         raise Exception(f"Failed to run dev server: {str(e)}")
 
 
@@ -934,4 +867,94 @@ def create_default_registry() -> ToolRegistry:
         function=run_dev_server
     ))
     
+    registry.register(Tool(
+        name="stop_dev_server",
+        description="Stop a running development server. Can stop by process ID, by name, or stop all servers if no parameters provided.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "process_id": {
+                    "type": "string",
+                    "description": "Process ID of the server to stop (optional)"
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Name of the server to stop (optional)"
+                }
+            },
+            "required": []
+        },
+        function=stop_dev_server
+    ))
+    
+    registry.register(Tool(
+        name="list_dev_servers",
+        description="List all currently running development servers with their status, URLs, and process IDs.",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": []
+        },
+        function=list_dev_servers
+    ))
+    
     return registry
+
+
+def stop_dev_server(process_id: str = None, name: str = None) -> str:
+    """Stop a running development server by ID or name."""
+    from src.process_manager import get_process_manager
+    from colorama import Fore, Style
+    
+    manager = get_process_manager()
+    
+    # If no ID or name provided, stop all
+    if not process_id and not name:
+        processes = manager.list_processes()
+        if not processes:
+            return "No servers are currently running."
+        
+        for proc in processes:
+            manager.stop_process(proc.id)
+        
+        return f"Stopped {len(processes)} server(s)."
+    
+    # Find by ID
+    if process_id:
+        if manager.stop_process(process_id):
+            return f"Stopped server {process_id}"
+        else:
+            return f"Server {process_id} not found"
+    
+    # Find by name
+    if name:
+        processes = manager.list_processes()
+        for proc in processes:
+            if proc.name == name:
+                manager.stop_process(proc.id)
+                return f"Stopped server '{name}'"
+        
+        return f"Server '{name}' not found"
+
+
+def list_dev_servers() -> str:
+    """List all running development servers."""
+    from src.process_manager import get_process_manager
+    
+    manager = get_process_manager()
+    processes = manager.list_processes()
+    
+    if not processes:
+        return "No servers are currently running."
+    
+    result = "Running servers:\n\n"
+    for proc in processes:
+        status = "running" if proc.process.poll() is None else "stopped"
+        result += f"● {proc.name}\n"
+        result += f"  ID: {proc.id}\n"
+        result += f"  Status: {status}\n"
+        if proc.url:
+            result += f"  URL: {proc.url}\n"
+        result += f"  Started: {proc.started_at.strftime('%H:%M:%S')}\n\n"
+    
+    return result

@@ -238,7 +238,7 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
             tools=tools
         )
     
-    async def send_message(self, message: str) -> Response:
+    async def send_message(self, message: str, indicator=None) -> Response:
         """
         Send a message to the AI provider and receive a response.
         
@@ -248,6 +248,7 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
         
         Args:
             message: The user's message to send
+            indicator: Optional RunningIndicator to control during tool execution
             
         Returns:
             Response object containing the AI's reply
@@ -291,8 +292,9 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
             
             # Check if model wants to call tools
             if response.tool_calls and self.tool_registry:
-                # Clear the thinking indicator line completely
-                print("\r" + " " * 100 + "\r")
+                # Stop the thinking indicator during tool execution
+                if indicator:
+                    indicator.stop()
                 
                 # Store tool calls for later reference
                 tool_call_messages = []
@@ -307,21 +309,28 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
                         tool_args = json.loads(tool_call["function"]["arguments"])
                         tool_call_id = tool_call["id"]
                         
-                        # Show tool name in [Tool: name] format
-                        print(f"{Fore.LIGHTBLACK_EX}[Tool: {tool_name}]{Style.RESET_ALL} ", end="")
+                        # Show tool with green dot
+                        print(f"{Fore.GREEN}●{Style.RESET_ALL} {Fore.CYAN}{tool_name}{Style.RESET_ALL}", end="")
                         
                         # Show path or key argument on same line if available
                         if "path" in tool_args:
-                            print(f"{Fore.CYAN}{tool_args['path']}{Style.RESET_ALL} ", end="")
+                            print(f" {Fore.LIGHTBLACK_EX}{tool_args['path']}{Style.RESET_ALL}", end="")
                         elif "directory" in tool_args:
-                            print(f"{Fore.CYAN}{tool_args['directory']}{Style.RESET_ALL} ", end="")
+                            print(f" {Fore.LIGHTBLACK_EX}{tool_args['directory']}{Style.RESET_ALL}", end="")
+                        elif "command" in tool_args:
+                            # Truncate long commands
+                            cmd = tool_args['command']
+                            if len(cmd) > 50:
+                                cmd = cmd[:47] + "..."
+                            print(f" {Fore.LIGHTBLACK_EX}{cmd}{Style.RESET_ALL}", end="")
+                        
+                        print()  # New line after tool info
                         
                         # Execute the tool
                         from src.tools import ToolCall
                         result = self.tool_registry.execute_tool(ToolCall(tool_name, tool_args))
                         
                         if result.success:
-                            print(f"{Fore.GREEN}✓{Style.RESET_ALL}")
                             tool_call_messages.append({
                                 "role": "tool",
                                 "tool_call_id": tool_call_id,
@@ -333,9 +342,9 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
                             if "Traceback" in error_msg:
                                 lines = error_msg.split('\n')
                                 error_line = next((line for line in reversed(lines) if line.strip()), error_msg)
-                                print(f"{Fore.RED}✗ {error_line}{Style.RESET_ALL}")
+                                print(f"  {Fore.RED}Error: {error_line}{Style.RESET_ALL}")
                             else:
-                                print(f"{Fore.RED}✗ {result.error}{Style.RESET_ALL}")
+                                print(f"  {Fore.RED}Error: {result.error}{Style.RESET_ALL}")
                             
                             tool_call_messages.append({
                                 "role": "tool",
@@ -357,27 +366,34 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
 
                     
                 else:
-                    # FAST MODE: Original behavior - execute all at once
+                    # FAST MODE: Execute all at once with clean display
                     for tool_call in response.tool_calls:
                         tool_name = tool_call["function"]["name"]
                         tool_args = json.loads(tool_call["function"]["arguments"])
                         tool_call_id = tool_call["id"]
                         
-                        # Show tool name in [Tool: name] format
-                        print(f"{Fore.LIGHTBLACK_EX}[Tool: {tool_name}]{Style.RESET_ALL} ", end="")
+                        # Show tool with green dot
+                        print(f"{Fore.GREEN}●{Style.RESET_ALL} {Fore.CYAN}{tool_name}{Style.RESET_ALL}", end="")
                         
                         # Show path or key argument on same line if available
                         if "path" in tool_args:
-                            print(f"{Fore.CYAN}{tool_args['path']}{Style.RESET_ALL} ", end="")
+                            print(f" {Fore.LIGHTBLACK_EX}{tool_args['path']}{Style.RESET_ALL}", end="")
                         elif "directory" in tool_args:
-                            print(f"{Fore.CYAN}{tool_args['directory']}{Style.RESET_ALL} ", end="")
+                            print(f" {Fore.LIGHTBLACK_EX}{tool_args['directory']}{Style.RESET_ALL}", end="")
+                        elif "command" in tool_args:
+                            # Truncate long commands
+                            cmd = tool_args['command']
+                            if len(cmd) > 50:
+                                cmd = cmd[:47] + "..."
+                            print(f" {Fore.LIGHTBLACK_EX}{cmd}{Style.RESET_ALL}", end="")
+                        
+                        print()  # New line after tool info
                         
                         # Execute the tool
                         from src.tools import ToolCall
                         result = self.tool_registry.execute_tool(ToolCall(tool_name, tool_args))
                         
                         if result.success:
-                            print(f"{Fore.GREEN}✓{Style.RESET_ALL}")
                             tool_call_messages.append({
                                 "role": "tool",
                                 "tool_call_id": tool_call_id,
@@ -389,9 +405,9 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
                             if "Traceback" in error_msg:
                                 lines = error_msg.split('\n')
                                 error_line = next((line for line in reversed(lines) if line.strip()), error_msg)
-                                print(f"{Fore.RED}✗ {error_line}{Style.RESET_ALL}")
+                                print(f"  {Fore.RED}Error: {error_line}{Style.RESET_ALL}")
                             else:
-                                print(f"{Fore.RED}✗ {result.error}{Style.RESET_ALL}")
+                                print(f"  {Fore.RED}Error: {result.error}{Style.RESET_ALL}")
                             
                             tool_call_messages.append({
                                 "role": "tool",
@@ -410,6 +426,10 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
                 for tool_msg in tool_call_messages:
                     # Store tool call ID in the message
                     self.add_message("tool", f"__TOOL_CALL_ID__:{tool_msg['tool_call_id']}:{tool_msg['content']}")
+                
+                # Restart the thinking indicator for next iteration
+                if indicator:
+                    indicator.start()
                 
                 # Continue the loop to get next response (might be more tool calls or final answer)
                 continue
