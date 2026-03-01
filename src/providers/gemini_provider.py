@@ -225,26 +225,37 @@ class GeminiProvider(AIProvider):
         # Make API request
         # Use v1beta for tool calling support
         api_url = f"{self.BASE_URL_BETA}/models/{context.model}:generateContent"
-        response = requests.post(
-            api_url,
-            params={"key": self.api_key},
-            json=payload,
-            timeout=60
-        )
+        
+        try:
+            response = requests.post(
+                api_url,
+                params={"key": self.api_key},
+                json=payload,
+                timeout=60
+            )
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"Request failed: {str(e)}")
         
         # Better error handling
         if response.status_code != 200:
-            error_data = response.json() if response.text else {}
-            error_msg = error_data.get("error", {}).get("message", response.text)
+            try:
+                error_data = response.json() if response.text else {}
+                error_msg = error_data.get("error", {}).get("message", response.text)
+            except:
+                error_msg = response.text
             raise Exception(f"Gemini API error ({response.status_code}): {error_msg}")
         
-        response.raise_for_status()
-        data = response.json()
+        try:
+            data = response.json()
+        except json.JSONDecodeError as e:
+            raise Exception(f"Failed to parse response JSON: {str(e)}")
         
         # Extract response content
         candidates = data.get("candidates", [])
         if not candidates:
-            raise ValueError("No response from Gemini")
+            # Debug: show what we got
+            import json as json_module
+            raise ValueError(f"No candidates in response. Full response: {json_module.dumps(data, indent=2)[:500]}")
         
         candidate = candidates[0]
         
@@ -252,9 +263,20 @@ class GeminiProvider(AIProvider):
         if "content" not in candidate:
             # Model might have been blocked or returned no content
             finish_reason = candidate.get("finishReason", "UNKNOWN")
-            raise ValueError(f"No content in response. Finish reason: {finish_reason}")
+            safety_ratings = candidate.get("safetyRatings", [])
+            raise ValueError(f"No content in response. Finish reason: {finish_reason}, Safety: {safety_ratings}")
         
-        parts = candidate["content"]["parts"]
+        # Check if parts exist in content
+        content = candidate.get("content", {})
+        if "parts" not in content:
+            import json as json_module
+            raise ValueError(f"No 'parts' in content. Content structure: {json_module.dumps(content, indent=2)[:500]}")
+        
+        parts = content["parts"]
+        
+        # Check if parts is empty
+        if not parts:
+            raise ValueError("Empty parts array in response")
         
         # Check if model wants to call a function or generated images
         function_calls = []

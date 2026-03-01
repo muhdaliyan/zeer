@@ -77,4 +77,4 @@ def display_image_in_terminal(filepath: str, max_width: int = 80) -> None:
     print(f"{Fore.CYAN}╭{header}{'─' * (max_width - len(header) - 1)}{Style.RESET_ALL}")
     print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Path:{Style.RESET_ALL} {Fore.YELLOW}{filepath}{Style.RESET_ALL}")
     print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Size:{Style.RESET_ALL} {size_kb:.1f} KB")
-    print(f"{Fore.CYAN}╰{'─' * max_width}{Style.RESET_ALL}\n")
+    print()

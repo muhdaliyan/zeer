@@ -49,13 +49,25 @@ def display_server(project: str, url: str):
     print(f"{Fore.GREEN}╰{'─' * max_width}{Style.RESET_ALL}")
 
 
+def display_error_box(error: str):
+    """Display an error message with box style (no right border)."""
+    term_width = shutil.get_terminal_size().columns
+    max_width = min(term_width - 2, 80)
+    
+    # Create header
+    header = "─ Error "
+    print(f"{Fore.RED}╭{header}{'─' * (max_width - len(header) - 1)}{Style.RESET_ALL}")
+    print(f"{Fore.RED}│{Style.RESET_ALL} {error}")
+    print(f"{Fore.RED}╰{'─' * max_width}{Style.RESET_ALL}")
+
+
 def main():
     """Demonstrate the new UI."""
     print("\n" + "=" * 80)
     print("🎨 New Box-Style UI Demonstration")
     print("=" * 80 + "\n")
     
-    print("Example 1: Multiple Tool Calls")
+    print("Example 1: Tools with Arguments")
     print("-" * 80 + "\n")
     
     display_tool("list_directory", "Directory", "src/")
@@ -66,14 +78,45 @@ def main():
     print()
     
     print("\n" + "-" * 80)
-    print("Example 2: Image Generation")
+    print("Example 2: Tools without Arguments (with action description)")
+    print("-" * 80 + "\n")
+    
+    # Simulate tools without arguments
+    term_width = shutil.get_terminal_size().columns
+    max_width = min(term_width - 2, 80)
+    
+    tool_header = "─ Tool: list_directory "
+    print(f"{Fore.CYAN}╭{tool_header}{'─' * (max_width - len(tool_header) - 1)}{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Listing current directory contents{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}╰{'─' * max_width}{Style.RESET_ALL}")
+    print()
+    
+    tool_header = "─ Tool: stop_dev_server "
+    print(f"{Fore.CYAN}╭{tool_header}{'─' * (max_width - len(tool_header) - 1)}{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Stopping development server{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}╰{'─' * max_width}{Style.RESET_ALL}")
+    print()
+    
+    print("\n" + "-" * 80)
+    print("Example 3: Tool with Error")
+    print("-" * 80 + "\n")
+    
+    tool_header = "─ Tool: read_file "
+    print(f"{Fore.CYAN}╭{tool_header}{'─' * (max_width - len(tool_header) - 1)}{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Path:{Style.RESET_ALL} non_existent_file.txt")
+    print(f"{Fore.RED}│ ✗ Failed to read file: File not found: non_existent_file.txt{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}╰{'─' * max_width}{Style.RESET_ALL}")
+    print()
+    
+    print("\n" + "-" * 80)
+    print("Example 4: Image Generation")
     print("-" * 80 + "\n")
     
     display_image("generated_images/image_20260301_143022_1.png", 245.3)
     print()
     
     print("\n" + "-" * 80)
-    print("Example 3: Server Running")
+    print("Example 5: Server Running")
     print("-" * 80 + "\n")
     
     print(f"{Fore.CYAN}╭─ Installing Dependencies ───────────────────────────────────────────────────{Style.RESET_ALL}")
@@ -89,8 +132,18 @@ def main():
     display_server("zeer_website", "http://localhost:5173/")
     print()
     
+    print("\n" + "-" * 80)
+    print("Example 6: Error Display")
+    print("-" * 80 + "\n")
+    
+    display_error_box("Failed to connect to API. Please check your internet connection.")
+    print()
+    
+    display_error_box("Model 'invalid-model' not found. Use /models to see available models.")
+    print()
+    
     print("\n" + "=" * 80)
-    print("✨ Clean, consistent, and professional!")
+    print("✨ Clean, consistent, and informative!")
     print("=" * 80 + "\n")
 
 

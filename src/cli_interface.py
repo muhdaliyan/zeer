@@ -7,7 +7,7 @@ This module handles all user interaction, input collection, and output formattin
 from typing import List, Optional
 import sys
 import inquirer
-from colorama import Fore, Style, init
+from colorama import Fore, Style, Back, init
 import time
 import threading
 import re
@@ -247,7 +247,38 @@ def display_branding() -> None:
 
 
 def display_error(error: str) -> None:
-    print(f"\n{Fore.RED}✗ Error:{Style.RESET_ALL} {error}\n", file=sys.stderr)
+    """Display error message with box style."""
+    import shutil
+    
+    # Get terminal width
+    term_width = shutil.get_terminal_size().columns
+    max_width = min(term_width - 2, 80)
+    
+    # Create header
+    header = "─ Error "
+    print(f"\n{Fore.RED}╭{header}{'─' * (max_width - len(header) - 1)}{Style.RESET_ALL}", file=sys.stderr)
+    
+    # Split error into lines if it's long
+    error_lines = error.split('\n')
+    for line in error_lines:
+        if line.strip():
+            # Wrap long lines
+            if len(line) > max_width - 4:
+                words = line.split()
+                current_line = ""
+                for word in words:
+                    if len(current_line) + len(word) + 1 <= max_width - 4:
+                        current_line += word + " "
+                    else:
+                        if current_line:
+                            print(f"{Fore.RED}│{Style.RESET_ALL} {current_line.strip()}", file=sys.stderr)
+                        current_line = word + " "
+                if current_line:
+                    print(f"{Fore.RED}│{Style.RESET_ALL} {current_line.strip()}", file=sys.stderr)
+            else:
+                print(f"{Fore.RED}│{Style.RESET_ALL} {line}", file=sys.stderr)
+    
+    print(file=sys.stderr)
 
 
 def prompt_choice(prompt: str, options: List[str]) -> str:
@@ -1210,107 +1241,298 @@ def display_assistant_message(
     from rich.console import Console
     display_console = Console(width=max_width)
     
-    # Strip ALL ANSI codes from the message (more comprehensive regex)
-    ansi_escape = re.compile(r'\x1b\[[0-9;]*m|\[0m|\[3[0-9]m|\[9[0-9]m|\[1m|\[4m')
-    clean_message = ansi_escape.sub('', message)
+    # STEP 1: Strip Gemini's fake ANSI codes (format: [35m not \x1b[35m)
+    message = re.sub(r'\[(\d+)m', '', message)
+    
+    # STEP 2: Detect and convert Gemini's line-numbered code to markdown
+    def detect_and_wrap_code(text):
+        """Detect code blocks with line numbers and wrap them in proper markdown."""
+        lines = text.split('\n')
+        result = []
+        in_code = False
+        code_lines = []
+        lang = ''
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            
+            # Check if this line is a language name (python, javascript, etc.)
+            lang_match = re.match(r'^(python|javascript|java|cpp|c|ruby|go|rust|typescript|php|swift|kotlin|scala|r|sql|bash|shell|html|css|json|yaml|xml|jsx|tsx)\s*$', line.lower())
+            
+            if lang_match and not in_code:
+                # Check if next line starts with a number (line number)
+                if i + 1 < len(lines) and re.match(r'^\d+\s+', lines[i + 1]):
+                    # This is the start of a code block
+                    lang = lang_match.group(1)
+                    in_code = True
+                    code_lines = []
+                    i += 1
+                    continue
+                else:
+                    # Just a regular line that happens to be a language name
+                    result.append(line)
+                    i += 1
+                    continue
+            
+            if in_code:
+                # Check if line has line number (no leading spaces before number)
+                # Match: line_number + single_space + rest_of_line (preserving indentation)
+                num_match = re.match(r'^(\d+) (.*)$', line)
+                if num_match:
+                    # Extract code part, preserving ALL spacing in the code
+                    code_part = num_match.group(2)
+                    code_lines.append(code_part)
+                    i += 1
+                    continue
+                elif not line.strip():
+                    # Empty line in code
+                    code_lines.append('')
+                    i += 1
+                    continue
+                else:
+                    # End of code block - no more line numbers
+                    result.append(f'```{lang}')
+                    result.extend(code_lines)
+                    result.append('```')
+                    code_lines = []
+                    in_code = False
+                    lang = ''
+                    result.append(line)
+                    i += 1
+                    continue
+            else:
+                result.append(line)
+                i += 1
+        
+        # Close any remaining code block
+        if in_code and code_lines:
+            result.append(f'```{lang}')
+            result.extend(code_lines)
+            result.append('```')
+        
+        return '\n'.join(result)
+    
+    message = detect_and_wrap_code(message)
+    clean_message = message
     
     # Parse markdown formatting and apply colors
     def format_text_with_colors(text):
         """Convert markdown to colored terminal output with smart styling."""
-        # Replace **bold** with cyan color
-        text = re.sub(r'\*\*([^*]+)\*\*', f'{Fore.CYAN}\\1{Style.RESET_ALL}', text)
+        import re
+        from pygments import highlight
+        from pygments.lexers import get_lexer_by_name, guess_lexer
+        from pygments.formatters import Terminal256Formatter
+        from pygments.util import ClassNotFound
+        from pygments.style import Style as PygmentsStyle
+        from pygments.token import Token
         
-        # Replace `code` with yellow
-        text = re.sub(r'`([^`]+)`', f'{Fore.YELLOW}\\1{Style.RESET_ALL}', text)
+        # Define a custom color scheme for terminal with COMPLETE coverage
+        class CustomStyle(PygmentsStyle):
+            default_style = ""
+            styles = {
+                # Keywords - magenta/purple
+                Token.Keyword: '#af00ff',
+                Token.Keyword.Constant: '#af00ff',
+                Token.Keyword.Declaration: '#af00ff',
+                Token.Keyword.Namespace: '#af00ff',
+                Token.Keyword.Pseudo: '#af00ff',
+                Token.Keyword.Reserved: '#af00ff',
+                Token.Keyword.Type: '#af00ff',
+                
+                # Names - yellow for functions/classes
+                Token.Name.Function: '#ffff00',
+                Token.Name.Class: '#ffff00',
+                Token.Name.Builtin: '#ffff00',
+                Token.Name.Builtin.Pseudo: '#ffff00',
+                Token.Name.Decorator: '#ffff00',
+                Token.Name.Exception: '#ffff00',
+                
+                # Strings - green
+                Token.String: '#00ff00',
+                Token.String.Doc: '#00ff00',
+                Token.String.Double: '#00ff00',
+                Token.String.Single: '#00ff00',
+                Token.String.Backtick: '#00ff00',
+                Token.String.Char: '#00ff00',
+                Token.String.Escape: '#00ff00',
+                Token.String.Interpol: '#00ff00',
+                
+                # Numbers - cyan
+                Token.Number: '#00ffff',
+                Token.Number.Float: '#00ffff',
+                Token.Number.Hex: '#00ffff',
+                Token.Number.Integer: '#00ffff',
+                Token.Number.Oct: '#00ffff',
+                Token.Number.Bin: '#00ffff',
+                
+                # Comments - gray
+                Token.Comment: '#808080',
+                Token.Comment.Single: '#808080',
+                Token.Comment.Multiline: '#808080',
+                Token.Comment.Preproc: '#808080',
+                Token.Comment.PreprocFile: '#808080',
+                Token.Comment.Special: '#808080',
+                
+                # Operators - red
+                Token.Operator: '#ff5555',
+                Token.Operator.Word: '#ff5555',
+                
+                # Punctuation - white
+                Token.Punctuation: '#ffffff',
+                
+                # Variables and names - white
+                Token.Name: '#ffffff',
+                Token.Name.Attribute: '#ffffff',
+                Token.Name.Variable: '#ffffff',
+                Token.Name.Variable.Class: '#ffffff',
+                Token.Name.Variable.Global: '#ffffff',
+                Token.Name.Variable.Instance: '#ffffff',
+                
+                # Generic/other - white
+                Token.Text: '#ffffff',
+                Token.Text.Whitespace: '',
+                Token.Literal: '#ffffff',
+                Token.Error: '#ff0000',
+            }
         
-        # Handle bullet points - make them cyan
-        text = re.sub(r'^\*\s+', f'{Fore.CYAN}• {Style.RESET_ALL}', text, flags=re.MULTILINE)
-        text = re.sub(r'^\-\s+', f'{Fore.CYAN}• {Style.RESET_ALL}', text, flags=re.MULTILINE)
+        # Split text into code blocks and non-code parts
+        parts = re.split(r'(```[\s\S]*?```)', text)
+        formatted_parts = []
         
-        # Color numbered lists (1. 2. 3. etc) - make numbers cyan
-        text = re.sub(r'^(\d+)\.\s+', f'{Fore.CYAN}\\1.{Style.RESET_ALL} ', text, flags=re.MULTILINE)
+        for part in parts:
+            if part.startswith('```') and part.endswith('```'):
+                # This is a code block - format it
+                lines = part[3:-3].split('\n')
+                lang = lines[0].strip() if lines and lines[0].strip() else ''
+                code = '\n'.join(lines[1:]) if len(lines) > 1 else ''
+                
+                if not code.strip():
+                    continue
+                
+                # Use Pygments for syntax highlighting
+                try:
+                    if lang:
+                        lexer = get_lexer_by_name(lang, stripall=True)
+                    else:
+                        lexer = guess_lexer(code)
+                except ClassNotFound:
+                    from pygments.lexers import TextLexer
+                    lexer = TextLexer()
+                
+                # Format with terminal colors using our custom style
+                formatter = Terminal256Formatter(style=CustomStyle)
+                highlighted = highlight(code, lexer, formatter)
+                
+                # Build code block with header and line numbers
+                result = []
+                result.append(f"\n{Fore.BLACK}{Back.LIGHTWHITE_EX} {lang or 'code'} {Style.RESET_ALL}")
+                
+                for idx, line in enumerate(highlighted.rstrip().split('\n'), 1):
+                    line_num = f"{idx:3d}"
+                    result.append(f"{Fore.WHITE}{Back.LIGHTBLACK_EX}{line_num}{Style.RESET_ALL}{Back.BLACK} {line}{Style.RESET_ALL}")
+                
+                result.append("")
+                # Mark this as a code block so we don't apply typewriter effect
+                formatted_parts.append(('CODE_BLOCK', '\n'.join(result)))
+            else:
+                # Regular text - apply markdown formatting
+                # Replace **bold** with cyan color
+                part = re.sub(r'\*\*([^*]+)\*\*', f'{Fore.CYAN}\\1{Style.RESET_ALL}', part)
+                
+                # Replace `code` with yellow
+                part = re.sub(r'`([^`]+)`', f'{Fore.YELLOW}\\1{Style.RESET_ALL}', part)
+                
+                # Handle bullet points - make them cyan
+                part = re.sub(r'^\*\s+', f'{Fore.CYAN}• {Style.RESET_ALL}', part, flags=re.MULTILINE)
+                part = re.sub(r'^\-\s+', f'{Fore.CYAN}• {Style.RESET_ALL}', part, flags=re.MULTILINE)
+                
+                # Color numbered lists
+                part = re.sub(r'^(\d+)\.\s+', f'{Fore.CYAN}\\1.{Style.RESET_ALL} ', part, flags=re.MULTILINE)
+                
+                # Color section headers
+                part = re.sub(r'^([A-Z][^:]+:)$', f'{Fore.MAGENTA}\\1{Style.RESET_ALL}', part, flags=re.MULTILINE)
+                
+                # Color file extensions
+                part = re.sub(r'(\.[a-z]{2,4})\b', f'{Fore.YELLOW}\\1{Style.RESET_ALL}', part)
+                
+                # Color paths
+                part = re.sub(r'(/[a-zA-Z0-9_/.-]+)', f'{Fore.YELLOW}\\1{Style.RESET_ALL}', part)
+                
+                # Color common directory/file names
+                part = re.sub(r'\b(__pycache__|node_modules|\.git|dist|build)\b', 
+                             f'{Fore.MAGENTA}\\1{Style.RESET_ALL}', part)
+                
+                formatted_parts.append(('TEXT', part))
         
-        # Color section headers (lines ending with colon that start a new concept)
-        # Like "Here's why directories are important:"
-        text = re.sub(r'^([A-Z][^:]+:)$', f'{Fore.MAGENTA}\\1{Style.RESET_ALL}', text, flags=re.MULTILINE)
-        
-        # Color file extensions (.py, .js, .json, etc)
-        text = re.sub(r'(\.[a-z]{2,4})\b', f'{Fore.YELLOW}\\1{Style.RESET_ALL}', text)
-        
-        # Color paths (things with / or \ that look like file paths)
-        text = re.sub(r'(/[a-zA-Z0-9_/.-]+)', f'{Fore.YELLOW}\\1{Style.RESET_ALL}', text)
-        
-        # Color common directory/file names
-        text = re.sub(r'\b(__pycache__|node_modules|\.git|dist|build)\b', 
-                     f'{Fore.MAGENTA}\\1{Style.RESET_ALL}', text)
-        
-        return text
+        return formatted_parts
     
     # Format the message
-    formatted_message = format_text_with_colors(clean_message)
+    formatted_parts = format_text_with_colors(clean_message)
     
-    # Calculate delay to fit within 5 seconds max
-    message_length = len(clean_message)
-    max_duration = 5.0  # 5 seconds max
+    # Calculate delay for text parts only
+    text_length = sum(len(part[1]) for part in formatted_parts if part[0] == 'TEXT')
+    max_duration = 5.0
     
-    if message_length > 0:
-        # Calculate delay per character to fit in 5 seconds
-        delay_per_char = max_duration / message_length
-        # Cap minimum at 0.001s (1ms) and maximum at 0.01s (10ms)
+    if text_length > 0:
+        delay_per_char = max_duration / text_length
         delay_per_char = max(0.001, min(delay_per_char, 0.01))
     else:
         delay_per_char = 0.005
     
-    # Typewriter effect - print character by character
-    i = 0
+    # Display with typewriter effect for text, instant for code blocks
     start_time = time.time()
     
-    while i < len(formatted_message):
-        # Check if we've exceeded 5 seconds - if so, print the rest instantly
-        if time.time() - start_time > max_duration:
-            sys.stdout.write(formatted_message[i:])
-            sys.stdout.flush()
-            break
-        
-        char = formatted_message[i]
-        
-        # Check if this is the start of an ANSI escape sequence
-        if char == '\x1b' and i + 1 < len(formatted_message) and formatted_message[i + 1] == '[':
-            # Find the end of the ANSI sequence (ends with 'm')
-            end = i + 2
-            while end < len(formatted_message) and formatted_message[end] != 'm':
-                end += 1
-            # Print the entire ANSI sequence at once (no delay)
-            sys.stdout.write(formatted_message[i:end + 1])
-            sys.stdout.flush()
-            i = end + 1
+    for part_type, content in formatted_parts:
+        if part_type == 'CODE_BLOCK':
+            # Print code blocks instantly (no typewriter effect)
+            print(content)
         else:
-            # Regular character - print with delay
-            sys.stdout.write(char)
-            sys.stdout.flush()
-            time.sleep(delay_per_char)
-            i += 1
+            # Apply typewriter effect to text
+            i = 0
+            while i < len(content):
+                # Check if we've exceeded 5 seconds
+                if time.time() - start_time > max_duration:
+                    sys.stdout.write(content[i:])
+                    sys.stdout.flush()
+                    break
+                
+                char = content[i]
+                
+                # Check if this is the start of an ANSI escape sequence
+                if char == '\x1b' and i + 1 < len(content) and content[i + 1] == '[':
+                    # Find the end of the ANSI sequence
+                    end = i + 2
+                    while end < len(content) and content[end] != 'm':
+                        end += 1
+                    # Print the entire ANSI sequence at once
+                    sys.stdout.write(content[i:end + 1])
+                    sys.stdout.flush()
+                    i = end + 1
+                else:
+                    # Regular character
+                    sys.stdout.write(char)
+                    sys.stdout.flush()
+                    time.sleep(delay_per_char)
+                    i += 1
     
     print("\n")  # New line after message
     
-    # Build metadata line - all grey
+    # Build metadata line
     metadata_parts = []
     metadata_parts.append(f"{model}")
     metadata_parts.append(f"{elapsed_time:.1f}s")
     
     if tokens:
-        # Show output/completion tokens
         completion_tokens = tokens.get('completionTokens', 0)
         if completion_tokens > 0:
             metadata_parts.append(f"{completion_tokens:,} tokens")
         
-        # Display context usage percentage
         prompt_tokens = tokens.get('promptTokens', 0)
         if context_window and context_window > 0:
             context_pct = (prompt_tokens / context_window) * 100
             metadata_parts.append(f"{context_pct:.1f}% context")
         elif prompt_tokens > 0:
-            # Show token count if no context window available
             metadata_parts.append(f"{prompt_tokens:,} context tokens")
     
     display_console.print(f"[dim]{' • '.join(metadata_parts)}[/dim]\n")

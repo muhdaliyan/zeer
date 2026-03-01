@@ -49,12 +49,27 @@ AUTONOMY & EXECUTION:
 2. When given a task, you MUST call ALL necessary tools to complete it in ONE GO
 3. DO NOT stop after calling one or two tools - call ALL files/tools needed
 4. DO NOT ask "should I continue?" or wait for user confirmation
-5. DO NOT say "I'll create the files" and then stop - CREATE THEM ALL IMMEDIATELY
-6. DO NOT explain what you're going to do - JUST DO IT
-7. Complete the ENTIRE task before responding with text
-8. Tools are executed sequentially with progress shown to the user
-9. SPEED MATTERS - Start with the first tool call within seconds, not minutes
-10. When user says "fix it" or "run and fix" - DO IT ALL: read files, fix issues, update files, run commands
+5. DO NOT ask "which file?" when you can list and figure it out yourself
+6. DO NOT say "I'll create the files" and then stop - CREATE THEM ALL IMMEDIATELY
+7. DO NOT explain what you're going to do - JUST DO IT
+8. Complete the ENTIRE task before responding with text
+9. Tools are executed sequentially with progress shown to the user
+10. SPEED MATTERS - Start with the first tool call within seconds, not minutes
+11. When user says "fix it" or "run and fix" - DO IT ALL: read files, fix issues, update files, run commands
+
+SMART FILE HANDLING:
+- When user says "add to existing file" or "list it" - immediately call list_directory, identify the relevant file, read it, and update it
+- When user says "list it" or "show files" - call list_directory AND display the results in your response
+- Use context clues to identify which file they mean (e.g., if discussing palindrome code, look for palindrome.py)
+- If there are multiple candidates, pick the most relevant one based on context
+- DO NOT ask "which file?" - make an intelligent choice and proceed
+
+WHEN TO USE vs NOT USE FILE TOOLS:
+- Use create_file/write_to_file when user explicitly asks to "create", "make", "write", "save", "add to" a file
+- DO NOT use file tools when user asks to "show", "display", "convert", "translate", "what would this look like"
+- For "show me X in Y language" - just display the converted code in your response, don't create files
+- For "convert this to X" - display the conversion, don't save it unless explicitly asked
+- Exception: "add this to file" or "save this" means use file tools
 
 FIXING ISSUES:
 - When user reports an error, immediately read the relevant files, identify the issue, fix ALL related files, and test
@@ -345,12 +360,37 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
                             action_desc = self._get_tool_action_description(tool_name)
                             print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}{action_desc}{Style.RESET_ALL}")
                         
-                        print(f"{Fore.CYAN}╰{'─' * max_width}{Style.RESET_ALL}")
-                        
-                        # Execute the tool
+                        # Execute the tool BEFORE closing the box
                         from src.tools import ToolCall
                         result = self.tool_registry.execute_tool(ToolCall(tool_name, tool_args))
                         
+                        # Show error inside the box if failed
+                        if not result.success:
+                            error_msg = result.error
+                            if "Traceback" in error_msg:
+                                lines = error_msg.split('\n')
+                                error_line = next((line for line in reversed(lines) if line.strip()), error_msg)
+                            else:
+                                error_line = error_msg
+                            
+                            # Display error inside box
+                            print(f"{Fore.RED}│ ✗ {error_line}{Style.RESET_ALL}")
+                        else:
+                            # Show output for certain tools that users want to see
+                            display_output_tools = ['list_directory', 'get_current_directory', 'read_file']
+                            if tool_name in display_output_tools and result.output:
+                                # Display the output in a readable format
+                                output_lines = result.output.split('\n')
+                                for line in output_lines[:20]:  # Limit to first 20 lines
+                                    if line.strip():
+                                        print(f"{Fore.CYAN}│{Style.RESET_ALL} {line}")
+                                if len(output_lines) > 20:
+                                    print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}... ({len(output_lines) - 20} more lines){Style.RESET_ALL}")
+                        
+                        # Close the box
+                        # No bottom border
+                        print()
+                        # Add to messages
                         if result.success:
                             tool_call_messages.append({
                                 "role": "tool",
@@ -358,15 +398,6 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
                                 "content": result.output
                             })
                         else:
-                            # Show error inline
-                            error_msg = result.error
-                            if "Traceback" in error_msg:
-                                lines = error_msg.split('\n')
-                                error_line = next((line for line in reversed(lines) if line.strip()), error_msg)
-                                print(f"  {Fore.RED}Error: {error_line}{Style.RESET_ALL}")
-                            else:
-                                print(f"  {Fore.RED}Error: {result.error}{Style.RESET_ALL}")
-                            
                             tool_call_messages.append({
                                 "role": "tool",
                                 "tool_call_id": tool_call_id,
@@ -429,18 +460,37 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
                             action_desc = self._get_tool_action_description(tool_name)
                             print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}{action_desc}{Style.RESET_ALL}")
                         
-                        print(f"{Fore.CYAN}╰{'─' * max_width}{Style.RESET_ALL}")
-                            cmd = tool_args['command']
-                            if len(cmd) > 60:
-                                cmd = cmd[:57] + "..."
-                            print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Command:{Style.RESET_ALL} {cmd}")
-                        
-                        print(f"{Fore.CYAN}╰{'─' * max_width}{Style.RESET_ALL}")
-                        
-                        # Execute the tool
+                        # Execute the tool BEFORE closing the box
                         from src.tools import ToolCall
                         result = self.tool_registry.execute_tool(ToolCall(tool_name, tool_args))
                         
+                        # Show error inside the box if failed
+                        if not result.success:
+                            error_msg = result.error
+                            if "Traceback" in error_msg:
+                                lines = error_msg.split('\n')
+                                error_line = next((line for line in reversed(lines) if line.strip()), error_msg)
+                            else:
+                                error_line = error_msg
+                            
+                            # Display error inside box
+                            print(f"{Fore.RED}│ ✗ {error_line}{Style.RESET_ALL}")
+                        else:
+                            # Show output for certain tools that users want to see
+                            display_output_tools = ['list_directory', 'get_current_directory', 'read_file']
+                            if tool_name in display_output_tools and result.output:
+                                # Display the output in a readable format
+                                output_lines = result.output.split('\n')
+                                for line in output_lines[:20]:  # Limit to first 20 lines
+                                    if line.strip():
+                                        print(f"{Fore.CYAN}│{Style.RESET_ALL} {line}")
+                                if len(output_lines) > 20:
+                                    print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}... ({len(output_lines) - 20} more lines){Style.RESET_ALL}")
+                        
+                        # Close the box
+                        # No bottom border
+                        print()
+                        # Add to messages
                         if result.success:
                             tool_call_messages.append({
                                 "role": "tool",
@@ -448,15 +498,6 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
                                 "content": result.output
                             })
                         else:
-                            # Show error inline
-                            error_msg = result.error
-                            if "Traceback" in error_msg:
-                                lines = error_msg.split('\n')
-                                error_line = next((line for line in reversed(lines) if line.strip()), error_msg)
-                                print(f"  {Fore.RED}Error: {error_line}{Style.RESET_ALL}")
-                            else:
-                                print(f"  {Fore.RED}Error: {result.error}{Style.RESET_ALL}")
-                            
                             tool_call_messages.append({
                                 "role": "tool",
                                 "tool_call_id": tool_call_id,

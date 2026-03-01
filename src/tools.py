@@ -460,7 +460,7 @@ def run_dev_server(directory: str, install_command: str = "npm install", dev_com
         # Step 1: Install dependencies
         print(f"\n{Fore.CYAN}╭─ Installing Dependencies ───────────────────────────────────────────────────{Style.RESET_ALL}")
         print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Project:{Style.RESET_ALL} {dir_path.name}")
-        print(f"{Fore.CYAN}╰{'─' * 80}{Style.RESET_ALL}\n")
+        print()
         
         install_result = subprocess.run(
             install_command,
@@ -480,7 +480,7 @@ def run_dev_server(directory: str, install_command: str = "npm install", dev_com
         # Step 2: Start dev server in background
         print(f"{Fore.CYAN}╭─ Starting Development Server ───────────────────────────────────────────────{Style.RESET_ALL}")
         print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Project:{Style.RESET_ALL} {dir_path.name}")
-        print(f"{Fore.CYAN}╰{'─' * 80}{Style.RESET_ALL}\n")
+        print()
         
         manager = get_process_manager()
         bg_process = manager.start_process(
@@ -498,13 +498,13 @@ def run_dev_server(directory: str, install_command: str = "npm install", dev_com
             print(f"{Fore.GREEN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Project:{Style.RESET_ALL} {dir_path.name}")
             print(f"{Fore.GREEN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}URL:{Style.RESET_ALL} {Fore.CYAN}{bg_process.url}{Style.RESET_ALL}")
             print(f"{Fore.GREEN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Status:{Style.RESET_ALL} Running in background")
-            print(f"{Fore.GREEN}╰{'─' * 80}{Style.RESET_ALL}\n")
+            print()
         else:
             print(f"{Fore.GREEN}╭─ Server Running ────────────────────────────────────────────────────────────{Style.RESET_ALL}")
             print(f"{Fore.GREEN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Project:{Style.RESET_ALL} {dir_path.name}")
             print(f"{Fore.GREEN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Process ID:{Style.RESET_ALL} {bg_process.id}")
             print(f"{Fore.GREEN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Status:{Style.RESET_ALL} Running in background")
-            print(f"{Fore.GREEN}╰{'─' * 80}{Style.RESET_ALL}\n")
+            print()
         
         return f"Development server for {directory} is running in background (ID: {bg_process.id})"
         
@@ -601,7 +601,7 @@ def create_default_registry() -> ToolRegistry:
     # Register file operation tools
     registry.register(Tool(
         name="create_file",
-        description="Create a new file with optional content",
+        description="Create a new file with optional content. Use this when user explicitly asks to CREATE, MAKE, WRITE, or SAVE a file. Do NOT use for 'show me', 'display', or 'convert' requests - just show the code in your response instead.",
         parameters={
             "type": "object",
             "properties": {
