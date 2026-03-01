@@ -7,7 +7,7 @@
 [![Downloads](https://img.shields.io/pypi/dm/zeer?color=blue)](https://pypi.org/project/zeer/)
 [![GitHub stars](https://img.shields.io/github/stars/muhdaliyan/zeer?style=social)](https://github.com/muhdaliyan/zeer)
 
-**Zeer** is an OpenSource agentic AI CLI that connects to multiple providers (OpenAI, Gemini, Claude, Ollama) with **tool-calling capabilities** and an **extensible skills system**.  
+**Zeer** is an OpenSource agentic AI CLI that connects to multiple providers (OpenAI, Gemini, Claude, Ollama) with **tool-calling capabilities**, an **extensible skills system**, and a **clean box-style UI**.  
 
 Think of it as **Claude Code for the terminal**, provider-agnostic and developer-friendly.
 
@@ -111,7 +111,7 @@ Zeer supports multiple AI providers:
 
 ### Cloud Providers (API Key Required)
 * **OpenAI** – GPT-4, GPT-3.5, and more
-* **Gemini** – Google's AI models
+* **Gemini** – Google's AI models (including image generation with Nano Banana)
 * **Claude** – Anthropic's Claude models
 * **Ollama Cloud** – Cloud-hosted Ollama models
 
@@ -121,6 +121,19 @@ Zeer supports multiple AI providers:
   * No API costs
   * Full privacy
   * See [OLLAMA_SETUP.md](OLLAMA_SETUP.md) for setup guide
+
+### 🎨 Image Generation Support
+Zeer supports image generation with Gemini's Nano Banana models:
+* Generated images are automatically saved to `generated_images/` folder
+* Images are displayed in the CLI with file path and size info
+* Supports PNG, JPEG, and other formats
+* See [GENERATED_IMAGES_INFO.md](GENERATED_IMAGES_INFO.md) for details
+
+```bash
+# Example: Generate an image
+> can you make an image of a sports car
+# Image saved to: generated_images/image_20260301_143022_1.png
+```
 
 ---
 

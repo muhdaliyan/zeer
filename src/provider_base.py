@@ -39,6 +39,7 @@ class Response:
     model: str
     usage: Optional[Dict[str, int]] = None  # promptTokens, completionTokens, totalTokens
     tool_calls: Optional[List[Dict[str, Any]]] = None  # Tool calls from the model
+    images: Optional[List[Dict[str, Any]]] = None  # Generated images (base64 data, mime type, etc.)
 
 
 @dataclass

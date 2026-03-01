@@ -45,6 +45,9 @@ htmlcov/
 .zeer/
 .zeer/
 
+# Generated images
+generated_images/
+
 # Temporary files
 *.tmp
 *.log

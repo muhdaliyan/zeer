@@ -25,8 +25,9 @@ class GeminiProvider(AIProvider):
             True if the API key is valid, False otherwise
         """
         try:
+            # Use v1beta endpoint to validate (same as get_models)
             response = requests.get(
-                f"{self.BASE_URL}/models",
+                f"{self.BASE_URL_BETA}/models",
                 params={"key": self.api_key},
                 timeout=10
             )
@@ -36,40 +37,96 @@ class GeminiProvider(AIProvider):
     
     async def get_models(self) -> List[Model]:
         """
-        Fetch available models from Gemini.
+        Fetch available models from Gemini API dynamically.
+        
+        This fetches the latest models from Google's Gemini API, including:
+        - Gemini 3.x series (3.1 Pro, 3 Flash, 3 Pro)
+        - Gemini 2.5 series (Flash, Flash-Lite, Pro)
+        - Specialized models (embeddings, audio, image generation)
         
         Returns:
-            List of Model objects
+            List of Model objects with latest available models
         """
-        response = requests.get(
-            f"{self.BASE_URL}/models",
-            params={"key": self.api_key},
-            timeout=10
-        )
-        response.raise_for_status()
-        
-        data = response.json()
-        models = []
-        
-        for model_data in data.get("models", []):
-            model_name = model_data.get("name", "")
-            # Extract model ID from full name (e.g., "models/gemini-pro" -> "gemini-pro")
-            model_id = model_name.split("/")[-1] if "/" in model_name else model_name
+        try:
+            # Use v1beta endpoint to get ALL models including Gemini 3.x
+            response = requests.get(
+                f"{self.BASE_URL_BETA}/models",
+                params={"key": self.api_key},
+                timeout=15  # Increased timeout for reliability
+            )
+            response.raise_for_status()
             
-            # Only include models that support generateContent
-            supported_methods = model_data.get("supportedGenerationMethods", [])
-            if "generateContent" in supported_methods:
-                # Get context window from inputTokenLimit
-                context_window = model_data.get("inputTokenLimit")
+            data = response.json()
+            models = []
+            
+            for model_data in data.get("models", []):
+                model_name = model_data.get("name", "")
+                # Extract model ID from full name (e.g., "models/gemini-pro" -> "gemini-pro")
+                model_id = model_name.split("/")[-1] if "/" in model_name else model_name
                 
-                models.append(Model(
-                    id=model_id,
-                    name=model_data.get("displayName", model_id),
-                    description=model_data.get("description"),
-                    context_window=context_window
-                ))
-        
-        return models
+                # Only include models that support generateContent
+                supported_methods = model_data.get("supportedGenerationMethods", [])
+                if "generateContent" in supported_methods:
+                    # Get context window from inputTokenLimit
+                    context_window = model_data.get("inputTokenLimit")
+                    
+                    # Get display name, fallback to model ID
+                    display_name = model_data.get("displayName", model_id)
+                    
+                    # Get description
+                    description = model_data.get("description", "")
+                    
+                    models.append(Model(
+                        id=model_id,
+                        name=display_name,
+                        description=description,
+                        context_window=context_window
+                    ))
+            
+            # Sort models: prioritize newer versions (3.x > 2.5 > 2.0 > 1.x)
+            # and stable over preview/experimental
+            def model_sort_key(model: Model) -> tuple:
+                model_id = model.id.lower()
+                
+                # Extract version number
+                version = 0
+                if "gemini-3" in model_id:
+                    version = 300
+                elif "gemini-2.5" in model_id:
+                    version = 250
+                elif "gemini-2.0" in model_id:
+                    version = 200
+                elif "gemini-1.5" in model_id:
+                    version = 150
+                elif "gemini-1.0" in model_id:
+                    version = 100
+                
+                # Prioritize stable over preview/experimental
+                stability = 0
+                if "experimental" in model_id:
+                    stability = 1
+                elif "preview" in model_id:
+                    stability = 2
+                else:
+                    stability = 3
+                
+                # Prioritize pro > flash > flash-lite
+                tier = 0
+                if "pro" in model_id:
+                    tier = 3
+                elif "flash-lite" in model_id:
+                    tier = 1
+                elif "flash" in model_id:
+                    tier = 2
+                
+                return (-version, -stability, -tier, model_id)
+            
+            models.sort(key=model_sort_key)
+            
+            return models
+            
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"Failed to fetch Gemini models: {str(e)}")
     
     async def send_message(self, message: str, context: ChatContext) -> Response:
         """
@@ -199,9 +256,10 @@ class GeminiProvider(AIProvider):
         
         parts = candidate["content"]["parts"]
         
-        # Check if model wants to call a function
+        # Check if model wants to call a function or generated images
         function_calls = []
         text_content = ""
+        images = []
         
         for part in parts:
             if "functionCall" in part:
@@ -228,6 +286,13 @@ class GeminiProvider(AIProvider):
                 function_calls.append(function_call_obj)
             elif "text" in part:
                 text_content += part["text"]
+            elif "inlineData" in part:
+                # Image data generated by the model
+                inline_data = part["inlineData"]
+                images.append({
+                    "data": inline_data.get("data", ""),  # base64 encoded image
+                    "mimeType": inline_data.get("mimeType", "image/png")
+                })
         
         # Extract usage information if available
         usage = None
@@ -239,19 +304,21 @@ class GeminiProvider(AIProvider):
                 "totalTokens": metadata.get("totalTokenCount", 0)
             }
         
-        # Return response with tool calls if any
+        # Return response with tool calls and/or images if any
         if function_calls:
             return Response(
                 content=text_content,
                 model=context.model,
                 usage=usage,
-                tool_calls=function_calls
+                tool_calls=function_calls,
+                images=images if images else None
             )
         
         return Response(
             content=text_content,
             model=context.model,
-            usage=usage
+            usage=usage,
+            images=images if images else None
         )
     
     def _convert_tools_to_gemini_format(self, openai_tools):

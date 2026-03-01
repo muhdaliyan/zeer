@@ -33,6 +33,7 @@ from src.providers.openrouter_provider import OpenRouterProvider
 from src.providers.ollama_provider import OllamaProvider
 from src.tools import create_default_registry, ToolRegistry
 from src.skills_manager import SkillsManager
+from src.image_handler import save_images, display_image_in_terminal
 
 import requests
 
@@ -825,6 +826,12 @@ class AppController:
                     if indicator.is_cancelled():
                         print(f"{Fore.YELLOW}✗ Operation cancelled{Style.RESET_ALL}\n")
                         continue
+                    
+                    # Handle generated images if any
+                    if response.images:
+                        saved_paths = save_images(response.images)
+                        for path in saved_paths:
+                            display_image_in_terminal(path)
                     
                     # Display assistant response with metadata
                     display_assistant_message(

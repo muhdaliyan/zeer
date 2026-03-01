@@ -309,22 +309,43 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
                         tool_args = json.loads(tool_call["function"]["arguments"])
                         tool_call_id = tool_call["id"]
                         
-                        # Show tool with green dot
-                        print(f"{Fore.GREEN}●{Style.RESET_ALL} {Fore.CYAN}{tool_name}{Style.RESET_ALL}", end="")
+                        # Show tool with box style (no right border)
+                        import shutil
+                        term_width = shutil.get_terminal_size().columns
+                        max_width = min(term_width - 2, 80)
                         
-                        # Show path or key argument on same line if available
+                        # Create tool header
+                        tool_header = f"─ Tool: {tool_name} "
+                        print(f"{Fore.CYAN}╭{tool_header}{'─' * (max_width - len(tool_header) - 1)}{Style.RESET_ALL}")
+                        
+                        # Show key arguments or action description
+                        has_content = False
                         if "path" in tool_args:
-                            print(f" {Fore.LIGHTBLACK_EX}{tool_args['path']}{Style.RESET_ALL}", end="")
+                            print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Path:{Style.RESET_ALL} {tool_args['path']}")
+                            has_content = True
                         elif "directory" in tool_args:
-                            print(f" {Fore.LIGHTBLACK_EX}{tool_args['directory']}{Style.RESET_ALL}", end="")
+                            print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Directory:{Style.RESET_ALL} {tool_args['directory']}")
+                            has_content = True
                         elif "command" in tool_args:
-                            # Truncate long commands
                             cmd = tool_args['command']
-                            if len(cmd) > 50:
-                                cmd = cmd[:47] + "..."
-                            print(f" {Fore.LIGHTBLACK_EX}{cmd}{Style.RESET_ALL}", end="")
+                            if len(cmd) > 60:
+                                cmd = cmd[:57] + "..."
+                            print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Command:{Style.RESET_ALL} {cmd}")
+                            has_content = True
+                        elif "name" in tool_args:
+                            print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Name:{Style.RESET_ALL} {tool_args['name']}")
+                            has_content = True
+                        elif "process_id" in tool_args or "id" in tool_args:
+                            pid = tool_args.get('process_id') or tool_args.get('id')
+                            print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Process ID:{Style.RESET_ALL} {pid}")
+                            has_content = True
                         
-                        print()  # New line after tool info
+                        # If no specific args, show action description
+                        if not has_content:
+                            action_desc = self._get_tool_action_description(tool_name)
+                            print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}{action_desc}{Style.RESET_ALL}")
+                        
+                        print(f"{Fore.CYAN}╰{'─' * max_width}{Style.RESET_ALL}")
                         
                         # Execute the tool
                         from src.tools import ToolCall
@@ -372,22 +393,49 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
                         tool_args = json.loads(tool_call["function"]["arguments"])
                         tool_call_id = tool_call["id"]
                         
-                        # Show tool with green dot
-                        print(f"{Fore.GREEN}●{Style.RESET_ALL} {Fore.CYAN}{tool_name}{Style.RESET_ALL}", end="")
+                        # Show tool with box style (no right border)
+                        import shutil
+                        term_width = shutil.get_terminal_size().columns
+                        max_width = min(term_width - 2, 80)
                         
-                        # Show path or key argument on same line if available
+                        # Create tool header
+                        tool_header = f"─ Tool: {tool_name} "
+                        print(f"{Fore.CYAN}╭{tool_header}{'─' * (max_width - len(tool_header) - 1)}{Style.RESET_ALL}")
+                        
+                        # Show key arguments or action description
+                        has_content = False
                         if "path" in tool_args:
-                            print(f" {Fore.LIGHTBLACK_EX}{tool_args['path']}{Style.RESET_ALL}", end="")
+                            print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Path:{Style.RESET_ALL} {tool_args['path']}")
+                            has_content = True
                         elif "directory" in tool_args:
-                            print(f" {Fore.LIGHTBLACK_EX}{tool_args['directory']}{Style.RESET_ALL}", end="")
+                            print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Directory:{Style.RESET_ALL} {tool_args['directory']}")
+                            has_content = True
                         elif "command" in tool_args:
-                            # Truncate long commands
                             cmd = tool_args['command']
-                            if len(cmd) > 50:
-                                cmd = cmd[:47] + "..."
-                            print(f" {Fore.LIGHTBLACK_EX}{cmd}{Style.RESET_ALL}", end="")
+                            if len(cmd) > 60:
+                                cmd = cmd[:57] + "..."
+                            print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Command:{Style.RESET_ALL} {cmd}")
+                            has_content = True
+                        elif "name" in tool_args:
+                            print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Name:{Style.RESET_ALL} {tool_args['name']}")
+                            has_content = True
+                        elif "process_id" in tool_args or "id" in tool_args:
+                            pid = tool_args.get('process_id') or tool_args.get('id')
+                            print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Process ID:{Style.RESET_ALL} {pid}")
+                            has_content = True
                         
-                        print()  # New line after tool info
+                        # If no specific args, show action description
+                        if not has_content:
+                            action_desc = self._get_tool_action_description(tool_name)
+                            print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}{action_desc}{Style.RESET_ALL}")
+                        
+                        print(f"{Fore.CYAN}╰{'─' * max_width}{Style.RESET_ALL}")
+                            cmd = tool_args['command']
+                            if len(cmd) > 60:
+                                cmd = cmd[:57] + "..."
+                            print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Command:{Style.RESET_ALL} {cmd}")
+                        
+                        print(f"{Fore.CYAN}╰{'─' * max_width}{Style.RESET_ALL}")
                         
                         # Execute the tool
                         from src.tools import ToolCall
@@ -450,6 +498,28 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
             List of Message objects in chronological order
         """
         return self._messages.copy()
+    
+    def _get_tool_action_description(self, tool_name: str) -> str:
+        """
+        Get a descriptive action for tools without specific arguments.
+        
+        Args:
+            tool_name: Name of the tool
+            
+        Returns:
+            Human-readable description of what the tool does
+        """
+        descriptions = {
+            "list_directory": "Listing current directory contents",
+            "get_current_directory": "Getting current working directory",
+            "list_dev_servers": "Listing running development servers",
+            "list_processes": "Listing background processes",
+            "stop_dev_server": "Stopping development server",
+            "get_system_info": "Getting system information",
+            "check_dependencies": "Checking installed dependencies",
+        }
+        
+        return descriptions.get(tool_name, "Executing action...")
     
     def clear_history(self) -> None:
         """

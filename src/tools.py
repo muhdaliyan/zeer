@@ -458,7 +458,9 @@ def run_dev_server(directory: str, install_command: str = "npm install", dev_com
         display = get_tool_display()
         
         # Step 1: Install dependencies
-        display.console.print(f"\n[cyan]Installing dependencies in {dir_path.name}...[/cyan]")
+        print(f"\n{Fore.CYAN}╭─ Installing Dependencies ───────────────────────────────────────────────────{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Project:{Style.RESET_ALL} {dir_path.name}")
+        print(f"{Fore.CYAN}╰{'─' * 80}{Style.RESET_ALL}\n")
         
         install_result = subprocess.run(
             install_command,
@@ -473,10 +475,12 @@ def run_dev_server(directory: str, install_command: str = "npm install", dev_com
             error_output = install_result.stderr or install_result.stdout
             raise Exception(f"Installation failed:\n{error_output}")
         
-        display.console.print(f"[green]✓ Dependencies installed[/green]\n")
+        print(f"{Fore.GREEN}✓ Dependencies installed{Style.RESET_ALL}\n")
         
         # Step 2: Start dev server in background
-        display.console.print(f"[cyan]Starting development server...[/cyan]\n")
+        print(f"{Fore.CYAN}╭─ Starting Development Server ───────────────────────────────────────────────{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Project:{Style.RESET_ALL} {dir_path.name}")
+        print(f"{Fore.CYAN}╰{'─' * 80}{Style.RESET_ALL}\n")
         
         manager = get_process_manager()
         bg_process = manager.start_process(
@@ -488,12 +492,19 @@ def run_dev_server(directory: str, install_command: str = "npm install", dev_com
         # Wait a bit for server to start and detect URL
         time.sleep(3)
         
-        # Show server running message
+        # Show server running message with box style
         if bg_process.url:
-            display.show_server_running(dir_path.name, bg_process.url)
+            print(f"{Fore.GREEN}╭─ Server Running ────────────────────────────────────────────────────────────{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Project:{Style.RESET_ALL} {dir_path.name}")
+            print(f"{Fore.GREEN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}URL:{Style.RESET_ALL} {Fore.CYAN}{bg_process.url}{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Status:{Style.RESET_ALL} Running in background")
+            print(f"{Fore.GREEN}╰{'─' * 80}{Style.RESET_ALL}\n")
         else:
-            display.console.print(f"\n[green]● Server started in background[/green]")
-            display.console.print(f"[dim]Process ID: {bg_process.id}[/dim]\n")
+            print(f"{Fore.GREEN}╭─ Server Running ────────────────────────────────────────────────────────────{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Project:{Style.RESET_ALL} {dir_path.name}")
+            print(f"{Fore.GREEN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Process ID:{Style.RESET_ALL} {bg_process.id}")
+            print(f"{Fore.GREEN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Status:{Style.RESET_ALL} Running in background")
+            print(f"{Fore.GREEN}╰{'─' * 80}{Style.RESET_ALL}\n")
         
         return f"Development server for {directory} is running in background (ID: {bg_process.id})"
         
