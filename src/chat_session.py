@@ -536,11 +536,14 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
                 continue
             
             # No more tool calls - this is the final response
-            self.add_message("assistant", response.content)
+            # Only add to history if there's actual content
+            if response.content and response.content.strip():
+                self.add_message("assistant", response.content)
             return response
         
         # If we hit max iterations, return the last response
-        self.add_message("assistant", response.content)
+        if response.content and response.content.strip():
+            self.add_message("assistant", response.content)
         return response
     
     def get_message_history(self) -> List[Message]:

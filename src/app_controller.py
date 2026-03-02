@@ -35,6 +35,7 @@ from src.providers.ollama_provider import OllamaProvider
 from src.tools import create_default_registry, ToolRegistry
 from src.skills_manager import SkillsManager
 from src.image_handler import save_images, display_image_in_terminal
+from src.messaging_platforms import MessagingPlatformsManager
 
 import requests
 
@@ -64,6 +65,7 @@ class AppController:
         self.chat_session: Optional[ChatSession] = None
         self.tool_registry: ToolRegistry = create_default_registry()
         self.skills_manager: SkillsManager = SkillsManager("skills")
+        self.telegram_bot_process = None  # Track background Telegram bot process
     
     def run(self, resume_session_id: Optional[str] = None) -> None:
         """
@@ -208,6 +210,9 @@ class AppController:
                 # No model selected - create a placeholder session
                 self.chat_session = None
             
+            # Auto-start Telegram bot in background if configured
+            self._start_telegram_bot_background()
+            
             # Start chat loop (no initial message)
             self._chat_loop(show_welcome=False)
             
@@ -216,6 +221,9 @@ class AppController:
         except Exception as e:
             display_error(f"Unexpected error: {str(e)}")
         finally:
+            # Stop Telegram bot if running
+            self._stop_telegram_bot_background()
+            
             # Clean up session
             self.session_manager.clear_session()
     
@@ -796,6 +804,7 @@ class AppController:
                         print(f"\n{Fore.CYAN}Available commands:{Style.RESET_ALL}")
                         print(f"  {Fore.YELLOW}/models{Style.RESET_ALL}    - Switch to a different model")
                         print(f"  {Fore.YELLOW}/providers{Style.RESET_ALL} - Switch to a different provider")
+                        print(f"  {Fore.YELLOW}/setup{Style.RESET_ALL}     - Setup messaging platforms (Telegram, WhatsApp, etc.)")
                         print(f"  {Fore.YELLOW}/clear{Style.RESET_ALL}     - Clear conversation history")
                         print(f"  {Fore.YELLOW}/reset{Style.RESET_ALL}     - Reset everything (history + saved credentials)")
                         print(f"  {Fore.YELLOW}/resume{Style.RESET_ALL}    - Resume a saved chat session")
@@ -807,6 +816,10 @@ class AppController:
                         print(f"  {Fore.YELLOW}/exit{Style.RESET_ALL}      - Exit the application")
                         print(f"  {Fore.YELLOW}/help{Style.RESET_ALL}      - Show this help message")
                         print(f"  {Fore.YELLOW}/{Style.RESET_ALL}          - Show command menu\n")
+                        continue
+                    
+                    elif command == '/setup':
+                        self._setup_messaging_platforms()
                         continue
                     
                     elif command == '/skills':
@@ -1360,3 +1373,375 @@ class AppController:
         print(f"{Fore.CYAN}Messages:{Style.RESET_ALL} {len(session_data['messages'])}\n")
         
         print()
+
+    def _setup_messaging_platforms(self) -> None:
+        """Setup messaging platforms like Telegram, WhatsApp, Slack, Discord."""
+        from rich.console import Console
+        from rich.table import Table
+        from rich.panel import Panel
+        import subprocess
+        import sys
+        
+        console = Console()
+        manager = MessagingPlatformsManager()
+        
+        while True:
+            # Show available platforms
+            platforms = manager.list_platforms()
+            
+            print()
+            console.print(Panel(
+                "[cyan bold]Messaging Platforms Setup[/cyan bold]\n\n"
+                "Connect your zeer assistant to messaging platforms.\n"
+                "Chat with your AI through Telegram, WhatsApp, Slack, or Discord.",
+                border_style="cyan"
+            ))
+            
+            # Create table
+            table = Table(show_header=True, header_style="bold cyan")
+            table.add_column("Platform", style="yellow", width=15)
+            table.add_column("Status", width=12)
+            table.add_column("Configured", width=12)
+            table.add_column("Description", style="dim", width=40)
+            
+            for platform in platforms:
+                # Status indicator
+                if platform["status"] == "available":
+                    status = "[green]Available[/green]"
+                else:
+                    status = "[yellow]Coming Soon[/yellow]"
+                
+                # Configured indicator
+                if platform["configured"]:
+                    configured = "[green]✓ Yes[/green]"
+                else:
+                    configured = "[dim]✗ No[/dim]"
+                
+                table.add_row(
+                    platform["name"],
+                    status,
+                    configured,
+                    platform["description"]
+                )
+            
+            console.print(table)
+            print()
+            
+            # Create options for selection
+            options = []
+            for platform in platforms:
+                if platform["status"] == "available":
+                    if platform["configured"]:
+                        options.append(f"{platform['name']} - Reconfigure")
+                    else:
+                        options.append(f"{platform['name']} - Setup")
+                else:
+                    options.append(f"{platform['name']} - Coming Soon")
+            
+            options.append("Start Bot (if configured)")
+            options.append("Back to Chat")
+            
+            # Let user select
+            try:
+                selected = prompt_choice("Select an option", options)
+            except KeyboardInterrupt:
+                display_info("Cancelled")
+                return
+            
+            if selected == "Back to Chat":
+                return
+            
+            if selected == "Start Bot (if configured)":
+                self._start_messaging_bot(manager)
+                continue
+            
+            # Extract platform name
+            platform_name = selected.split(" - ")[0].lower()
+            
+            # Check if coming soon
+            if "Coming Soon" in selected:
+                console.print(f"\n[yellow]{platform_name.title()} integration is coming soon![/yellow]")
+                console.print("[dim]Stay tuned for updates.[/dim]\n")
+                input("Press Enter to continue...")
+                continue
+            
+            # Setup the platform
+            if platform_name == "telegram":
+                self._setup_telegram(manager)
+            # Add more platforms here as they become available
+    
+    def _setup_telegram(self, manager: MessagingPlatformsManager) -> None:
+        """Setup Telegram bot configuration."""
+        from rich.console import Console
+        from rich.panel import Panel
+        
+        console = Console()
+        
+        print()
+        console.print(Panel(
+            "[cyan bold]Telegram Bot Setup[/cyan bold]\n\n"
+            "To create a Telegram bot:\n"
+            "1. Open Telegram and search for @BotFather\n"
+            "2. Send /newbot command\n"
+            "3. Follow the prompts to create your bot\n"
+            "4. Copy the bot token (looks like: 123456789:ABCdef...)\n"
+            "5. Paste it below",
+            border_style="cyan"
+        ))
+        
+        print()
+        print(f"{Fore.CYAN}Enter your Telegram bot token:{Style.RESET_ALL}")
+        print(f"{Fore.LIGHTBLACK_EX}(or press Enter to cancel){Style.RESET_ALL}")
+        
+        bot_token = input(f"{Fore.YELLOW}Bot Token:{Style.RESET_ALL} ").strip()
+        
+        if not bot_token:
+            display_info("Cancelled")
+            return
+        
+        # Validate token format (basic check)
+        if ":" not in bot_token or len(bot_token) < 20:
+            display_error("Invalid token format. Token should look like: 123456789:ABCdef...")
+            return
+        
+        # Save configuration
+        config = {
+            "bot_token": bot_token
+        }
+        
+        if manager.set_platform_config("telegram", config):
+            display_success("Telegram bot configured successfully!")
+            print()
+            print(f"{Fore.CYAN}Next steps:{Style.RESET_ALL}")
+            print(f"  1. Select 'Start Bot' from the menu")
+            print(f"  2. Open Telegram and find your bot")
+            print(f"  3. Send /start to begin chatting")
+            print()
+        else:
+            display_error("Failed to save configuration")
+    
+    def _start_messaging_bot(self, manager: MessagingPlatformsManager) -> None:
+        """Start a configured messaging bot."""
+        from rich.console import Console
+        
+        console = Console()
+        
+        # Check which platforms are configured
+        platforms = manager.list_platforms()
+        configured_platforms = [p for p in platforms if p["configured"] and p["status"] == "available"]
+        
+        if not configured_platforms:
+            console.print("\n[yellow]No platforms configured yet.[/yellow]")
+            console.print("[dim]Please setup a platform first.[/dim]\n")
+            input("Press Enter to continue...")
+            return
+        
+        # If only one platform, start it directly
+        if len(configured_platforms) == 1:
+            platform = configured_platforms[0]
+            self._start_platform_bot(platform["id"], manager)
+            return
+        
+        # Multiple platforms - let user choose
+        options = [f"{p['name']}" for p in configured_platforms]
+        options.append("Cancel")
+        
+        try:
+            selected = prompt_choice("Select platform to start", options)
+        except KeyboardInterrupt:
+            display_info("Cancelled")
+            return
+        
+        if selected == "Cancel":
+            return
+        
+        # Find platform ID
+        platform_id = None
+        for p in configured_platforms:
+            if p["name"] == selected:
+                platform_id = p["id"]
+                break
+        
+        if platform_id:
+            self._start_platform_bot(platform_id, manager)
+    
+    def _start_platform_bot(self, platform_id: str, manager: MessagingPlatformsManager) -> None:
+        """Start a specific platform bot."""
+        import subprocess
+        import sys
+        import os
+        from rich.console import Console
+        from rich.panel import Panel
+        
+        console = Console()
+        
+        if platform_id == "telegram":
+            # Get configuration
+            config = manager.get_platform_config("telegram")
+            if not config:
+                display_error("Telegram not configured")
+                return
+            
+            bot_token = config.get("bot_token")
+            
+            # Get AI provider configuration
+            provider_name = self.session_manager.get_provider()
+            api_key = self.session_manager.get_api_key(provider_name) if provider_name else None
+            model_id = self.session_manager.get_model()
+            
+            if not provider_name or not api_key:
+                display_error("Please configure an AI provider first using /providers")
+                return
+            
+            if not model_id:
+                display_error("Please select a model first using /models")
+                return
+            
+            # Check if python-telegram-bot is installed
+            try:
+                import telegram
+            except ImportError:
+                console.print("\n[yellow]python-telegram-bot not installed[/yellow]\n")
+                console.print("Install with:")
+                console.print("  [cyan]pip install python-telegram-bot[/cyan]\n")
+                
+                install = prompt_choice(
+                    "Would you like to install it now?",
+                    ["Yes", "No"]
+                )
+                
+                if install == "Yes":
+                    console.print("\n[cyan]Installing python-telegram-bot...[/cyan]")
+                    try:
+                        subprocess.check_call([sys.executable, "-m", "pip", "install", "python-telegram-bot"])
+                        display_success("Installed successfully!")
+                    except Exception as e:
+                        display_error(f"Installation failed: {e}")
+                        return
+                else:
+                    return
+            
+            # Set environment variables
+            os.environ["TELEGRAM_BOT_TOKEN"] = bot_token
+            os.environ["AI_PROVIDER"] = provider_name
+            os.environ["AI_API_KEY"] = api_key
+            os.environ["AI_MODEL"] = model_id
+            
+            print()
+            console.print(Panel(
+                f"[cyan bold]Starting Telegram Bot[/cyan bold]\n\n"
+                f"Provider: [yellow]{provider_name}[/yellow]\n"
+                f"Model: [yellow]{model_id}[/yellow]\n"
+                f"Token: [dim]{bot_token[:10]}...{bot_token[-4:]}[/dim]\n\n"
+                f"[green]Bot will start in a new window...[/green]\n"
+                f"Press Ctrl+C in that window to stop the bot.",
+                border_style="cyan"
+            ))
+            
+            print()
+            print(f"{Fore.CYAN}Starting bot...{Style.RESET_ALL}")
+            print(f"{Fore.LIGHTBLACK_EX}(This will open in a new terminal window){Style.RESET_ALL}\n")
+            
+            # Start the bot using the telegram_bot module
+            try:
+                from src.telegram_bot import TelegramBot
+                
+                print(f"{Fore.GREEN}✓ Bot module loaded{Style.RESET_ALL}")
+                print(f"{Fore.YELLOW}Starting bot... Press Ctrl+C to stop{Style.RESET_ALL}\n")
+                
+                bot = TelegramBot(bot_token, provider_name, api_key, model_id)
+                bot.run()
+                
+            except KeyboardInterrupt:
+                print(f"\n{Fore.CYAN}Bot stopped{Style.RESET_ALL}\n")
+            except Exception as e:
+                display_error(f"Failed to start bot: {e}")
+                print(f"\n{Fore.YELLOW}You can also start the bot manually:{Style.RESET_ALL}")
+                print(f"  {Fore.CYAN}python start_telegram_bot.py{Style.RESET_ALL}\n")
+
+    def _start_telegram_bot_background(self) -> bool:
+        """
+        Start Telegram bot in background if configured.
+        
+        Returns:
+            True if bot started successfully, False otherwise
+        """
+        import subprocess
+        import sys
+        import os
+        from colorama import Fore, Style
+        
+        # Check if Telegram is configured
+        manager = MessagingPlatformsManager()
+        config = manager.get_platform_config("telegram")
+        
+        if not config or not config.get("bot_token"):
+            return False
+        
+        # Check if we have provider and model configured
+        provider_name = self.session_manager.get_provider()
+        api_key = self.session_manager.get_api_key(provider_name) if provider_name else None
+        model_id = self.session_manager.get_model()
+        
+        if not provider_name or not api_key or not model_id:
+            return False
+        
+        # Check if python-telegram-bot is installed
+        try:
+            import telegram
+        except ImportError:
+            return False
+        
+        # Set environment variables
+        env = os.environ.copy()
+        env["TELEGRAM_BOT_TOKEN"] = config.get("bot_token")
+        env["AI_PROVIDER"] = provider_name
+        env["AI_API_KEY"] = api_key
+        env["AI_MODEL"] = model_id
+        
+        try:
+            # Start bot in background using subprocess
+            # Use DEVNULL to suppress output
+            self.telegram_bot_process = subprocess.Popen(
+                [sys.executable, "-m", "src.telegram_bot"],
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL
+            )
+            
+            # Give it a moment to start
+            import time
+            time.sleep(0.5)
+            
+            # Check if process is still running
+            if self.telegram_bot_process.poll() is None:
+                print(f"{Fore.GREEN}✓ Telegram bot started in background{Style.RESET_ALL}")
+                print(f"{Fore.LIGHTBLACK_EX}  Bot will stop when you exit zeer{Style.RESET_ALL}\n")
+                return True
+            else:
+                self.telegram_bot_process = None
+                return False
+                
+        except Exception as e:
+            self.telegram_bot_process = None
+            return False
+    
+    def _stop_telegram_bot_background(self) -> None:
+        """Stop background Telegram bot if running."""
+        if self.telegram_bot_process:
+            try:
+                self.telegram_bot_process.terminate()
+                # Wait up to 2 seconds for graceful shutdown
+                try:
+                    self.telegram_bot_process.wait(timeout=2)
+                except:
+                    # Force kill if it doesn't stop
+                    self.telegram_bot_process.kill()
+                
+                from colorama import Fore, Style
+                print(f"\n{Fore.CYAN}Telegram bot stopped{Style.RESET_ALL}")
+            except:
+                pass
+            finally:
+                self.telegram_bot_process = None

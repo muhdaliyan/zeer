@@ -1,0 +1,23 @@
+# Dockerfile for zeer Telegram bot
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy project files
+COPY . /app
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -e . && \
+    pip install --no-cache-dir python-telegram-bot python-dotenv
+
+# Create directory for generated images
+RUN mkdir -p generated_images
+
+# Run the bot
+CMD ["python", "start_telegram_bot.py"]

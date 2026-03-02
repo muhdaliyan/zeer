@@ -70,6 +70,8 @@ zeer
 
 ## 🎯 Quick Start
 
+### CLI Mode
+
 ```bash
 zeer
 ```
@@ -78,6 +80,27 @@ zeer
 2. Enter your API key
 3. Choose a model
 4. Start chatting and using AI tools
+
+### Telegram Bot Mode 🆕
+
+Run your zeer assistant as a Telegram bot!
+
+**Option 1: Quick Setup via CLI (Recommended)**
+```bash
+zeer
+> /setup
+# Select Telegram, enter bot token, start bot!
+```
+
+**Option 2: Manual Setup**
+```bash
+pip install python-telegram-bot python-dotenv
+cp .env.example .env
+# Edit .env with your tokens
+python start_telegram_bot.py
+```
+
+See [SETUP_COMMAND_GUIDE.md](SETUP_COMMAND_GUIDE.md) for the `/setup` command guide, [TELEGRAM_QUICKSTART.md](TELEGRAM_QUICKSTART.md) for the 5-minute manual setup, or [TELEGRAM_SETUP.md](TELEGRAM_SETUP.md) for detailed instructions.
 
 ---
 

@@ -1,0 +1,34 @@
+# Docker Compose for zeer Telegram bot
+version: '3.8'
+
+services:
+  zeer-telegram:
+    build:
+      context: .
+      dockerfile: Dockerfile.telegram
+    container_name: zeer-telegram-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Mount generated images directory
+      - ./generated_images:/app/generated_images
+      # Mount skills directory for custom skills
+      - ./skills:/app/skills
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - AI_PROVIDER=${AI_PROVIDER}
+      - AI_API_KEY=${AI_API_KEY}
+      - AI_MODEL=${AI_MODEL}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Usage:
+# 1. Create .env file with your tokens
+# 2. Build: docker-compose -f docker-compose.telegram.yml build
+# 3. Run: docker-compose -f docker-compose.telegram.yml up -d
+# 4. Logs: docker-compose -f docker-compose.telegram.yml logs -f
+# 5. Stop: docker-compose -f docker-compose.telegram.yml down

@@ -147,7 +147,11 @@ class GeminiProvider(AIProvider):
             if msg.role == "assistant" and msg.content.startswith("__TOOL_CALLS__:"):
                 # Reconstruct assistant message with function calls
                 tool_calls_json = msg.content.replace("__TOOL_CALLS__:", "")
-                tool_calls = json.loads(tool_calls_json)
+                try:
+                    tool_calls = json.loads(tool_calls_json)
+                except json.JSONDecodeError:
+                    # Skip malformed tool calls
+                    continue
                 
                 # Convert to Gemini format
                 parts = []
@@ -168,13 +172,18 @@ class GeminiProvider(AIProvider):
                     
                     parts.append(part)
                 
-                contents.append({
-                    "role": "model",
-                    "parts": parts
-                })
+                # Only add if we have parts
+                if parts:
+                    contents.append({
+                        "role": "model",
+                        "parts": parts
+                    })
             elif msg.role == "tool" and "__TOOL_CALL_ID__:" in msg.content:
                 # Reconstruct tool response message
                 parts_split = msg.content.split(":", 2)
+                if len(parts_split) < 2:
+                    continue
+                    
                 tool_call_id = parts_split[1]
                 content = parts_split[2] if len(parts_split) > 2 else ""
                 
@@ -196,6 +205,11 @@ class GeminiProvider(AIProvider):
             else:
                 # Gemini uses "user" and "model" roles
                 role = "model" if msg.role == "assistant" else "user"
+                
+                # Skip empty messages
+                if not msg.content or not msg.content.strip():
+                    continue
+                
                 contents.append({
                     "role": role,
                     "parts": [{"text": msg.content}]
@@ -269,7 +283,23 @@ class GeminiProvider(AIProvider):
         # Check if parts exist in content
         content = candidate.get("content", {})
         if "parts" not in content:
+            # Sometimes Gemini returns empty content with just role
+            # This can happen when the model has nothing to say after tool calls
+            # Return an empty response instead of erroring
             import json as json_module
+            
+            # Check if this is just an empty model response (common after tool calls)
+            if content.get("role") == "model" and len(content) == 1:
+                # Return empty response - the model is waiting for more context
+                return Response(
+                    content="",
+                    model=context.model,
+                    usage=None,
+                    tool_calls=None,
+                    images=None
+                )
+            
+            # Otherwise, this is an unexpected format
             raise ValueError(f"No 'parts' in content. Content structure: {json_module.dumps(content, indent=2)[:500]}")
         
         parts = content["parts"]

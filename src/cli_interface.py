@@ -32,6 +32,7 @@ class CommandCompleter(Completer):
         self.commands = {
             "/models": "Switch model",
             "/providers": "Switch provider",
+            "/setup": "Setup messaging platforms",
             "/clear": "Clear conversation",
             "/reset": "Reset everything",
             "/skills": "List agent skills",
@@ -566,6 +567,7 @@ def prompt_slash_command() -> str:
     commands = [
         "/models - Switch model",
         "/providers - Switch provider",
+        "/setup - Setup messaging platforms",
         "/clear - Clear conversation",
         "/reset - Reset everything",
         "/resume - Resume saved session",

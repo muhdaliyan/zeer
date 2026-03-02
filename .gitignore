@@ -51,3 +51,8 @@ generated_images/
 # Temporary files
 *.tmp
 *.log
+
+# Environment variables (contains sensitive tokens)
+.env
+.env.local
+.env.*.local
