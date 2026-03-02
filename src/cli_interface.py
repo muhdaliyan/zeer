@@ -568,6 +568,7 @@ def prompt_slash_command() -> str:
         "/models - Switch model",
         "/providers - Switch provider",
         "/setup - Setup messaging platforms",
+        "/status - Show Telegram bot status",
         "/clear - Clear conversation",
         "/reset - Reset everything",
         "/resume - Resume saved session",
