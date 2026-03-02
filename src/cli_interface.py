@@ -119,10 +119,10 @@ def display_branding() -> None:
     
     # Compact text for small terminals
     if total_width < 70:
-        subtitle_text = "AI CLI"
+        subtitle_text = "OpenSource"
         version_text = f"v{__version__}"
     else:
-        subtitle_text = "Agentic AI CLI • OpenSource"
+        subtitle_text = "OpenSource"
         version_text = f"v{__version__}"
     
     # Right section content - adapt text length based on width
@@ -198,8 +198,15 @@ def display_branding() -> None:
     # Build banner lines - stick together with no extra spacing
     lines = []
     
-    # Top border
-    lines.append(f"{Fore.RED}┌{'─' * left_width}┬{'─' * right_width}┐{Style.RESET_ALL}")
+    # Top border with title
+    title = " Agentic AI CLI "
+    title_len = len(title)
+    # Calculate how many dashes on each side
+    total_border_width = left_width + right_width + 1  # +1 for the middle divider
+    left_dashes = 4  # Fixed number of dashes before title
+    right_dashes = total_border_width - left_dashes - title_len
+    
+    lines.append(f"{Fore.RED}┌{'─' * left_dashes}{Fore.CYAN}{title}{Fore.RED}{'─' * right_dashes}┐{Style.RESET_ALL}")
     
     # Build all content rows
     for i in range(max_lines):
@@ -561,6 +568,8 @@ def prompt_slash_command() -> str:
         "/providers - Switch provider",
         "/clear - Clear conversation",
         "/reset - Reset everything",
+        "/resume - Resume saved session",
+        "/sessions - List saved sessions",
         "/skills - List agent skills",
         "/tools - List available tools",
         "/servers - Show running servers",
@@ -1063,7 +1072,7 @@ def display_input_prompt_with_slash_detection() -> tuple:
         
         def get_bottom_toolbar():
             # Add just 2 empty lines for minimal spacing
-            return PTK_HTML(f'<ansibrightblack>{separator_line}</ansibrightblack>\n<ansibrightblack>{toolbar_text}</ansibrightblack>\n\n\n\n\n\n\n\n\n\n\n\n')
+            return PTK_HTML(f'<ansibrightblack>{separator_line}</ansibrightblack>\n<ansibrightblack>{toolbar_text}</ansibrightblack>\n\n\n\n\n\n')
         
         # Custom style to remove white background
         custom_prompt_style = PromptStyle.from_dict({

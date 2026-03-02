@@ -22,6 +22,7 @@ from src.cli_interface import (
 from colorama import Fore, Style
 from src.validation import validate_provider_selection, validate_api_key, validate_model_selection
 from src.session import SessionManager
+from src.session_storage import SessionStorage
 from src.model_manager import fetch_models, display_models
 from src.chat_session import ChatSession
 from src.error_handler import handle_network_error, handle_api_error, is_recoverable, format_error_message
@@ -58,14 +59,18 @@ class AppController:
     def __init__(self):
         """Initialize the application controller."""
         self.session_manager = SessionManager()
+        self.session_storage = SessionStorage()
         self.provider: Optional[AIProvider] = None
         self.chat_session: Optional[ChatSession] = None
         self.tool_registry: ToolRegistry = create_default_registry()
         self.skills_manager: SkillsManager = SkillsManager("skills")
     
-    def run(self) -> None:
+    def run(self, resume_session_id: Optional[str] = None) -> None:
         """
         Main entry point that coordinates the entire application flow.
+        
+        Args:
+            resume_session_id: Optional session ID to resume automatically
         
         Flow:
         1. Display branding
@@ -86,6 +91,21 @@ class AppController:
             from colorama import Fore, Style
             print(f"{Fore.LIGHTBLACK_EX}Open source project • Run locally • Contribute on GitHub{Style.RESET_ALL}")
             print()
+            
+            # If resume_session_id is provided, try to resume that session
+            if resume_session_id:
+                session_data = self.session_storage.load_session(resume_session_id)
+                if not session_data:
+                    display_error(f"Session '{resume_session_id}' not found")
+                    print(f"{Fore.YELLOW}Starting a new session instead...{Style.RESET_ALL}\n")
+                else:
+                    # Try to resume the session
+                    if self._resume_session_by_id(resume_session_id, session_data):
+                        # Successfully resumed, start chat loop
+                        self._chat_loop(show_welcome=False)
+                        return
+                    else:
+                        print(f"{Fore.YELLOW}Failed to resume session. Starting a new session instead...{Style.RESET_ALL}\n")
             
             # Check for saved credentials
             saved_creds = self.session_manager.load_saved_credentials()
@@ -639,6 +659,13 @@ class AppController:
                 if command and command.startswith('/'):
                     
                     if command in ['/exit', '/quit']:
+                        # Save session before exiting
+                        if self.chat_session and self.chat_session.get_message_count() > 2:
+                            session_id = self._save_current_session()
+                            if session_id:
+                                print(f"\n{Fore.GREEN}✓ Session saved!{Style.RESET_ALL}")
+                                print(f"{Fore.CYAN}Resume with:{Style.RESET_ALL} zeer chat {session_id}")
+                        
                         print(f"\n{Fore.CYAN}Exiting chat. Goodbye!{Style.RESET_ALL}")
                         break
                     
@@ -694,8 +721,15 @@ class AppController:
                             
                             # Confirm if there's an existing chat session
                             if self.chat_session and self.chat_session.get_message_count() > 2:  # More than system messages
-                                print(f"{Fore.YELLOW}⚠ Warning: Changing models will clear your current chat session.{Style.RESET_ALL}")
-                                confirm = input(f"{Fore.CYAN}Continue? (y/n):{Style.RESET_ALL} ").strip().lower()
+                                print(f"{Fore.YELLOW}⚠ Warning: Changing models will save your current chat session.{Style.RESET_ALL}")
+                                
+                                # Save current session
+                                session_id = self._save_current_session()
+                                if session_id:
+                                    print(f"{Fore.GREEN}✓ Session saved!{Style.RESET_ALL}")
+                                    print(f"{Fore.CYAN}Resume with:{Style.RESET_ALL} zeer chat {session_id}\n")
+                                
+                                confirm = input(f"{Fore.CYAN}Continue to change model? (y/n):{Style.RESET_ALL} ").strip().lower()
                                 if confirm != 'y' and confirm != 'yes':
                                     display_info("Cancelled. Keeping current model.")
                                     continue
@@ -764,6 +798,8 @@ class AppController:
                         print(f"  {Fore.YELLOW}/providers{Style.RESET_ALL} - Switch to a different provider")
                         print(f"  {Fore.YELLOW}/clear{Style.RESET_ALL}     - Clear conversation history")
                         print(f"  {Fore.YELLOW}/reset{Style.RESET_ALL}     - Reset everything (history + saved credentials)")
+                        print(f"  {Fore.YELLOW}/resume{Style.RESET_ALL}    - Resume a saved chat session")
+                        print(f"  {Fore.YELLOW}/sessions{Style.RESET_ALL}  - List all saved sessions")
                         print(f"  {Fore.YELLOW}/skills{Style.RESET_ALL}    - List available agent skills")
                         print(f"  {Fore.YELLOW}/tools{Style.RESET_ALL}     - List available tools")
                         print(f"  {Fore.YELLOW}/servers{Style.RESET_ALL}   - Show running background servers")
@@ -789,12 +825,27 @@ class AppController:
                         self._toggle_execution_mode()
                         continue
                     
+                    elif command == '/resume':
+                        self._resume_session()
+                        continue
+                    
+                    elif command == '/sessions':
+                        self._list_sessions()
+                        continue
+                    
                     else:
                         display_error(f"Unknown command: {user_message}. Type / for available commands.")
                         continue
                 
                 # Check for exit command (without slash)
                 if user_message.lower() in ['exit', 'quit', 'bye']:
+                    # Save session before exiting
+                    if self.chat_session and self.chat_session.get_message_count() > 2:
+                        session_id = self._save_current_session()
+                        if session_id:
+                            print(f"\n{Fore.GREEN}✓ Session saved!{Style.RESET_ALL}")
+                            print(f"{Fore.CYAN}Resume with:{Style.RESET_ALL} zeer chat {session_id}")
+                    
                     print(f"\n{Fore.CYAN}Exiting chat. Goodbye!{Style.RESET_ALL}")
                     break
                 
@@ -869,25 +920,43 @@ class AppController:
                 # Double Ctrl+C to exit
                 current_time = time.time()
                 if current_time - last_ctrl_c_time < ctrl_c_timeout:
-                    # Second Ctrl+C within timeout - exit
-                    print(f"\n\n{Fore.CYAN}Exiting chat...{Style.RESET_ALL}")
+                    # Second Ctrl+C within timeout - exit immediately
+                    print(f"\n\n{Fore.CYAN}Exiting zeer. Goodbye!{Style.RESET_ALL}")
                     break
                 else:
-                    # First Ctrl+C - show temporary message below input area
+                    # First Ctrl+C - save session and show exit message
                     last_ctrl_c_time = current_time
                     import sys
                     
-                    # Show message
-                    sys.stdout.write(f"\n{Fore.YELLOW}Press Ctrl+C again within 2 seconds to exit{Style.RESET_ALL}")
+                    # Save session if there's content
+                    session_id = None
+                    if self.chat_session and self.chat_session.get_message_count() > 2:
+                        session_id = self._save_current_session()
+                    
+                    # Show message with session info if saved
+                    if session_id:
+                        sys.stdout.write(f"\n{Fore.GREEN}✓ Session saved!{Style.RESET_ALL} Resume with: {Fore.CYAN}zeer chat {session_id}{Style.RESET_ALL}")
+                        sys.stdout.write(f"\n{Fore.YELLOW}Press Ctrl+C again within 2 seconds to exit{Style.RESET_ALL}")
+                    else:
+                        sys.stdout.write(f"\n{Fore.YELLOW}Press Ctrl+C again within 2 seconds to exit{Style.RESET_ALL}")
                     sys.stdout.flush()
                     
                     # Wait 2 seconds
                     time.sleep(2.0)
                     
-                    # Clear the message line
-                    sys.stdout.write('\r' + ' ' * 100 + '\r')  # Clear line
-                    sys.stdout.write('\033[F')  # Move up one line
-                    sys.stdout.write('\r' + ' ' * 100 + '\r')  # Clear that line too
+                    # Clear the message lines
+                    if session_id:
+                        # Clear 2 lines (session saved + exit message)
+                        sys.stdout.write('\r' + ' ' * 100 + '\r')  # Clear current line
+                        sys.stdout.write('\033[F')  # Move up one line
+                        sys.stdout.write('\r' + ' ' * 100 + '\r')  # Clear that line
+                        sys.stdout.write('\033[F')  # Move up one more line
+                        sys.stdout.write('\r' + ' ' * 100 + '\r')  # Clear that line too
+                    else:
+                        # Clear 1 line (just exit message)
+                        sys.stdout.write('\r' + ' ' * 100 + '\r')  # Clear line
+                        sys.stdout.write('\033[F')  # Move up one line
+                        sys.stdout.write('\r' + ' ' * 100 + '\r')  # Clear that line too
                     sys.stdout.flush()
                     
                     # Reset the timer since 2 seconds passed
@@ -898,6 +967,105 @@ class AppController:
                 display_error(str(e))
                 # Make all errors recoverable - don't exit
                 print(f"\n{Fore.YELLOW}You can continue chatting or use /help for commands.{Style.RESET_ALL}\n")
+    
+    def _save_current_session(self) -> Optional[str]:
+        """
+        Save the current chat session to disk.
+        
+        Returns:
+            Session ID if saved successfully, None otherwise
+        """
+        if not self.chat_session:
+            return None
+        
+        # Generate or use existing session ID
+        if not self.chat_session.session_id:
+            self.chat_session.session_id = self.session_storage.generate_session_id()
+        
+        session_id = self.chat_session.session_id
+        
+        # Export messages
+        messages = self.chat_session.export_messages()
+        
+        # Save to storage
+        success = self.session_storage.save_session(
+            session_id,
+            messages,
+            self.session_manager.get_provider() or "unknown",
+            self.session_manager.get_model() or "unknown"
+        )
+        
+        return session_id if success else None
+    
+    def _resume_session_by_id(self, session_id: str, session_data: dict) -> bool:
+        """
+        Resume a session by ID with session data.
+        
+        Args:
+            session_id: The session ID to resume
+            session_data: The loaded session data
+            
+        Returns:
+            True if successfully resumed, False otherwise
+        """
+        from colorama import Fore, Style
+        
+        saved_provider = session_data["provider"]
+        saved_model = session_data["model"]
+        
+        # Initialize provider if needed
+        api_key = self.session_manager.get_api_key(saved_provider)
+        
+        if not api_key:
+            # Check saved credentials
+            saved_creds = self.session_manager.load_saved_credentials()
+            if saved_creds and 'providers' in saved_creds and saved_provider in saved_creds['providers']:
+                api_key = saved_creds['providers'][saved_provider].get('api_key')
+                if api_key or (saved_provider == "ollama" and api_key == ""):
+                    self.session_manager.store_api_key(api_key, saved_provider)
+                    self.session_manager.store_provider(saved_provider)
+        
+        if not api_key and saved_provider != "ollama":
+            display_error(f"No API key found for provider: {saved_provider}")
+            return False
+        
+        # For Ollama, empty string is valid
+        if saved_provider == "ollama" and not api_key:
+            api_key = ""
+            self.session_manager.store_api_key(api_key, saved_provider)
+            self.session_manager.store_provider(saved_provider)
+        
+        self.provider = self._initialize_provider(saved_provider, api_key)
+        if not self.provider:
+            display_error("Failed to initialize provider")
+            return False
+        
+        # Create new chat session with the saved model
+        self.chat_session = ChatSession(
+            self.provider,
+            saved_model,
+            None,
+            self.tool_registry,
+            self.skills_manager,
+            session_id=session_id,
+            skip_system_messages=True
+        )
+        
+        # Import messages
+        self.chat_session.import_messages(session_data["messages"])
+        
+        # Update session manager
+        self.session_manager.store_provider(saved_provider)
+        self.session_manager.store_model(saved_model)
+        
+        # Show success message
+        provider_display = self.PROVIDERS.get(saved_provider, {}).get('name', saved_provider)
+        print(f"{Fore.GREEN}✓ Resumed session {session_id}{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}Provider:{Style.RESET_ALL} {provider_display}")
+        print(f"{Fore.CYAN}Model:{Style.RESET_ALL} {saved_model}")
+        print(f"{Fore.CYAN}Messages:{Style.RESET_ALL} {len(session_data['messages'])}\n")
+        
+        return True
     
     def _display_skills(self) -> None:
         """Display available agent skills in a grid format."""
@@ -1040,5 +1208,155 @@ class AppController:
         else:
             config.set("execution_mode", "fast")
             display_success("Switched to fast mode - files will be created quickly")
+    
+    def _list_sessions(self) -> None:
+        """List all saved chat sessions."""
+        from rich.console import Console
+        from rich.table import Table
+        from datetime import datetime
+        
+        console = Console()
+        sessions = self.session_storage.list_sessions()
+        
+        if not sessions:
+            console.print("\n[yellow]No saved sessions found.[/yellow]\n")
+            return
+        
+        print()
+        table = Table(title="Saved Chat Sessions", show_header=True, header_style="bold cyan")
+        table.add_column("Session ID", style="cyan", width=10)
+        table.add_column("Provider", style="magenta", width=10)
+        table.add_column("Model", style="green", width=18)
+        table.add_column("Last Message", style="yellow", width=40)
+        table.add_column("Created", style="dim", width=12)
+        
+        for session in sessions:
+            created = datetime.fromisoformat(session["created_at"])
+            created_str = created.strftime("%Y-%m-%d %H:%M")
+            
+            # Truncate last message if too long
+            last_msg = session.get("last_user_message", "")
+            if last_msg:
+                if len(last_msg) > 40:
+                    last_msg = last_msg[:37] + "..."
+            else:
+                last_msg = "[dim](no messages)[/dim]"
+            
+            table.add_row(
+                session["session_id"],
+                session["provider"],
+                session["model"],
+                last_msg,
+                created_str
+            )
+        
+        console.print(table)
+        console.print(f"\n[dim]Use /resume to continue a session[/dim]\n")
+    
+    def _resume_session(self) -> None:
+        """Resume a saved chat session."""
+        from datetime import datetime
+        
+        sessions = self.session_storage.list_sessions()
+        
+        if not sessions:
+            display_error("No saved sessions found.")
+            return
+        
+        # Create options for selection
+        options = []
+        for session in sessions:
+            created = datetime.fromisoformat(session["created_at"])
+            created_str = created.strftime("%Y-%m-%d %H:%M")
+            
+            # Get last message preview
+            last_msg = session.get("last_user_message", "")
+            if last_msg:
+                # Truncate for display
+                if len(last_msg) > 30:
+                    last_msg = last_msg[:27] + "..."
+                msg_preview = f'"{last_msg}"'
+            else:
+                msg_preview = "(no messages)"
+            
+            options.append(
+                f"{session['session_id']} - {msg_preview} ({session['provider']}/{session['model']}, {created_str})"
+            )
+        options.append("Cancel")
+        
+        # Let user select a session
+        from src.cli_interface import prompt_searchable_choice
+        try:
+            selected = prompt_searchable_choice(
+                "Select a session to resume",
+                options
+            )
+        except KeyboardInterrupt:
+            display_info("Cancelled")
+            return
+        
+        if selected == "Cancel":
+            display_info("Cancelled")
+            return
+        
+        # Extract session ID
+        session_id = selected.split(" - ")[0]
+        
+        # Load session data
+        session_data = self.session_storage.load_session(session_id)
+        if not session_data:
+            display_error(f"Failed to load session {session_id}")
+            return
+        
+        # Check if we need to switch provider/model
+        saved_provider = session_data["provider"]
+        saved_model = session_data["model"]
+        
+        # Initialize provider if needed
+        if not self.provider or self.session_manager.get_provider() != saved_provider:
+            # Need to initialize the provider
+            api_key = self.session_manager.get_api_key(saved_provider)
+            
+            if not api_key:
+                # Check saved credentials
+                saved_creds = self.session_manager.load_saved_credentials()
+                if saved_creds and 'providers' in saved_creds and saved_provider in saved_creds['providers']:
+                    api_key = saved_creds['providers'][saved_provider].get('api_key')
+                    if api_key:
+                        self.session_manager.store_api_key(api_key, saved_provider)
+                        self.session_manager.store_provider(saved_provider)
+            
+            if not api_key:
+                display_error(f"No API key found for provider: {saved_provider}")
+                print(f"{Fore.YELLOW}Please set up the provider first using /providers{Style.RESET_ALL}")
+                return
+            
+            self.provider = self._initialize_provider(saved_provider, api_key)
+            if not self.provider:
+                display_error("Failed to initialize provider")
+                return
+        
+        # Create new chat session with the saved model
+        self.chat_session = ChatSession(
+            self.provider,
+            saved_model,
+            None,
+            self.tool_registry,
+            self.skills_manager,
+            session_id=session_id,
+            skip_system_messages=True
+        )
+        
+        # Import messages
+        self.chat_session.import_messages(session_data["messages"])
+        
+        # Update session manager
+        self.session_manager.store_provider(saved_provider)
+        self.session_manager.store_model(saved_model)
+        
+        display_success(f"Resumed session {session_id}")
+        print(f"{Fore.CYAN}Provider:{Style.RESET_ALL} {saved_provider}")
+        print(f"{Fore.CYAN}Model:{Style.RESET_ALL} {saved_model}")
+        print(f"{Fore.CYAN}Messages:{Style.RESET_ALL} {len(session_data['messages'])}\n")
         
         print()

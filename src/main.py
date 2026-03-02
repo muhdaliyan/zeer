@@ -9,6 +9,7 @@ Requirements: 1.1, 8.2
 """
 
 import sys
+import argparse
 from src.app_controller import AppController
 
 
@@ -21,10 +22,39 @@ def main():
     
     Requirements: 1.1, 8.2
     """
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description="Zeer - Agentic AI CLI",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  zeer                    Start a new chat session
+  zeer chat <session-id>  Resume a saved chat session
+        """
+    )
+    parser.add_argument(
+        'command',
+        nargs='?',
+        choices=['chat'],
+        help='Command to execute'
+    )
+    parser.add_argument(
+        'session_id',
+        nargs='?',
+        help='Session ID to resume (use with "chat" command)'
+    )
+    
+    args = parser.parse_args()
+    
     try:
-        # Instantiate and run the application controller
+        # Instantiate the application controller
         app = AppController()
-        app.run()
+        
+        # Check if user wants to resume a session
+        if args.command == 'chat' and args.session_id:
+            app.run(resume_session_id=args.session_id)
+        else:
+            app.run()
         
     except KeyboardInterrupt:
         # Handle Ctrl+C gracefully

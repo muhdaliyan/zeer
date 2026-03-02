@@ -3,7 +3,7 @@ name: frontend-design
 description: Create distinctive, production-grade frontend interfaces with high design quality. Use this skill when the user asks to build web components, pages, artifacts, posters, or applications (examples include websites, landing pages, dashboards, React components, HTML/CSS layouts, or when styling/beautifying any web UI). Generates creative, polished code and UI design that avoids generic AI aesthetics.
 license: MIT
 compatibility: Web (HTML, CSS, JS, React, Next.js, Vue)
-allowed-tools: create_file read_file list_directory make_directory write_to_file run_dev_server install_npm_package
+allowed-tools: create_file read_file list_directory make_directory write_to_file run_dev_server install_npm_package generate_image
 ---
 
 ## Goal
@@ -99,3 +99,63 @@ User: "Build a SaaS dashboard UI"
 User: "Make a personal portfolio"
 → Select expressive typography, bold layouts, animated page reveals  
 → Build a visually distinctive, non-template interface
+
+
+## Image Generation Integration
+
+When building websites or applications, you can generate custom images using the `generate_image` tool:
+
+### When to Offer Image Generation
+
+- **Always ask first**: "Would you like me to generate custom images using Google's Imagen AI for this project?"
+- Offer for: hero images, backgrounds, logos, illustrations, product mockups
+- Don't generate without permission
+
+### Best Practices
+
+1. **Ask Permission**: Always confirm before generating images
+2. **Context-Aware Prompts**: Match the website's aesthetic and purpose
+3. **Appropriate Ratios**: 
+   - Hero images: 16:9
+   - Logos: 1:1
+   - Mobile designs: 9:16
+   - General content: 4:3
+4. **Save to Project**: Use `project-name/images/` directory
+5. **Descriptive Names**: `hero-background.png`, `logo.png`, not `image1.png`
+
+### Example Workflow
+
+```
+User: "Create a landing page for a coffee shop"
+
+AI: "I'll create a landing page for your coffee shop. Would you like me to generate 
+a custom hero image using Google's Imagen AI? (This will create a professional 
+photograph of a cozy coffee shop interior)"
+
+User: "Yes please"
+
+AI: [Calls generate_image]
+prompt: "Professional photograph of cozy coffee shop interior, warm lighting, 
+wooden tables, espresso machine in background, inviting atmosphere, natural light, 
+high quality, 16:9 aspect ratio"
+output_dir: "coffee-shop/images"
+filename: "hero-background.jpg"
+
+[Then creates HTML with the generated image]
+```
+
+### Prompt Guidelines for Web Design
+
+- **Hero Images**: "Professional photograph of [subject], [lighting], [atmosphere], 16:9 aspect ratio, high quality"
+- **Backgrounds**: "Abstract [style] background, [colors], subtle, modern, 16:9"
+- **Logos**: "A [style] logo for a [industry] company on solid color background. Include text [name]."
+- **Illustrations**: "Modern [style] illustration of [subject], clean lines, [colors], professional"
+
+### Quality Modifiers
+
+Always include these for professional results:
+- "professional"
+- "high quality"
+- "modern"
+- "clean"
+- "polished"

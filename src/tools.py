@@ -342,11 +342,6 @@ def run_shell_command(command: str, working_directory: str = ".") -> str:
         if sys.platform == 'win32' and ('npm create' in command or 'npx create' in command):
             command = f'echo y | {command}'
         
-        # Show what command is running
-        print(f"\n{Fore.CYAN}Running: {command}{Style.RESET_ALL}")
-        if str(work_dir) != ".":
-            print(f"{Fore.LIGHTBLACK_EX}In: {work_dir}{Style.RESET_ALL}")
-        
         # Set environment variables to skip all prompts
         env = os.environ.copy()
         env['npm_config_yes'] = 'true'
@@ -379,7 +374,7 @@ def run_shell_command(command: str, working_directory: str = ".") -> str:
         
         output_lines = []
         
-        # Read output in real-time
+        # Read output in real-time with styled display
         try:
             while True:
                 line = process.stdout.readline()
@@ -391,7 +386,8 @@ def run_shell_command(command: str, working_directory: str = ".") -> str:
                 
                 line = line.rstrip()
                 if line:
-                    print(f"{Fore.LIGHTBLACK_EX}{line}{Style.RESET_ALL}")
+                    # Display with cyan pipe for consistency
+                    print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}{line}{Style.RESET_ALL}")
                     output_lines.append(line)
         except KeyboardInterrupt:
             process.kill()
@@ -413,8 +409,11 @@ def run_shell_command(command: str, working_directory: str = ".") -> str:
                 error_msg += f":\n{combined_output}"
             raise Exception(error_msg)
         
-        print(f"{Fore.GREEN}✓ Command completed{Style.RESET_ALL}\n")
-        return combined_output if combined_output else "Command executed successfully"
+        # Return success message with working directory info
+        success_msg = "Command executed successfully"
+        if str(work_dir) != str(Path.cwd()):
+            success_msg += f" in {work_dir}"
+        return success_msg
         
     except subprocess.TimeoutExpired:
         process.kill()
@@ -591,6 +590,118 @@ def install_package(package_name: str) -> str:
         raise Exception("Installation timed out after 10 minutes")
     except Exception as e:
         raise Exception(f"Failed to install package: {str(e)}")
+
+
+def generate_image(prompt: str, aspect_ratio: str = "1:1", number_of_images: int = 1, output_dir: str = "generated_images", filename: str = None) -> str:
+    """Generate images using Google's Imagen model.
+    
+    IMPORTANT: This requires Google Cloud API key with Imagen access.
+    The model used is 'imagen-4.0-generate-001' (Imagen 4 Standard).
+    
+    Args:
+        prompt: Detailed text description of the image to generate
+        aspect_ratio: Image aspect ratio - "1:1", "4:3", "3:4", "16:9", "9:16" (default: "1:1")
+        number_of_images: Number of images to generate (1-4, default: 1)
+        output_dir: Directory to save images (default: "generated_images")
+        filename: Custom filename (optional, auto-generated if not provided)
+        
+    Returns:
+        Success message with saved file paths
+    """
+    from colorama import Fore, Style
+    from datetime import datetime
+    import base64
+    
+    try:
+        # Check if google-genai is installed
+        try:
+            from google import genai
+            from google.genai import types
+        except ImportError:
+            raise Exception("Google GenAI library not installed. Install it with: pip install google-genai")
+        
+        # Get API key from environment
+        api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY')
+        if not api_key:
+            raise Exception("No API key found. Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable.")
+        
+        # Validate parameters
+        valid_ratios = ["1:1", "4:3", "3:4", "16:9", "9:16"]
+        if aspect_ratio not in valid_ratios:
+            raise Exception(f"Invalid aspect ratio. Must be one of: {', '.join(valid_ratios)}")
+        
+        if not 1 <= number_of_images <= 4:
+            raise Exception("Number of images must be between 1 and 4")
+        
+        # Create output directory
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        
+        # Show generation progress
+        print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Generating {number_of_images} image(s) with Imagen 4...{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Prompt: {prompt[:60]}{'...' if len(prompt) > 60 else ''}{Style.RESET_ALL}")
+        
+        # Initialize client
+        client = genai.Client(api_key=api_key)
+        
+        # Map aspect ratio to Imagen format
+        aspect_ratio_map = {
+            "1:1": "1:1",
+            "4:3": "4:3",
+            "3:4": "3:4",
+            "16:9": "16:9",
+            "9:16": "9:16"
+        }
+        
+        # Generate images
+        response = client.models.generate_images(
+            model='imagen-4.0-generate-001',
+            prompt=prompt,
+            config=types.GenerateImagesConfig(
+                number_of_images=number_of_images,
+                aspect_ratio=aspect_ratio_map[aspect_ratio]
+            )
+        )
+        
+        # Save images
+        saved_paths = []
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        for idx, generated_image in enumerate(response.generated_images, 1):
+            # Get image bytes
+            image_bytes = generated_image.image.image_bytes
+            
+            # Generate filename
+            if filename and number_of_images == 1:
+                # Use custom filename for single image
+                if not filename.endswith('.png'):
+                    filename += '.png'
+                filepath = os.path.join(output_dir, filename)
+            else:
+                # Auto-generate filename
+                base_name = filename.replace('.png', '') if filename else 'image'
+                filepath = os.path.join(output_dir, f"{base_name}_{timestamp}_{idx}.png")
+            
+            # Save image
+            with open(filepath, 'wb') as f:
+                f.write(base64.b64decode(image_bytes))
+            
+            saved_paths.append(filepath)
+            
+            # Get file size
+            file_size = os.path.getsize(filepath)
+            size_kb = file_size / 1024
+            
+            # Display saved image info
+            print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.GREEN}✓ Saved:{Style.RESET_ALL} {filepath} ({size_kb:.1f} KB)")
+        
+        # Return success message
+        if len(saved_paths) == 1:
+            return f"Image generated and saved to: {saved_paths[0]}"
+        else:
+            return f"Generated {len(saved_paths)} images:\n" + "\n".join(f"  - {path}" for path in saved_paths)
+            
+    except Exception as e:
+        raise Exception(f"Failed to generate image: {str(e)}")
 
 
 # Initialize default tool registry
@@ -907,6 +1018,42 @@ def create_default_registry() -> ToolRegistry:
             "required": []
         },
         function=list_dev_servers
+    ))
+    
+    registry.register(Tool(
+        name="generate_image",
+        description="Generate high-quality images using Google's Imagen 4 model. Use this when building websites, apps, or projects that need custom images, logos, illustrations, or visual assets. IMPORTANT: Always ask user permission before generating images. Requires GEMINI_API_KEY environment variable.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "Detailed text description of the image to generate. Be specific about subject, style, context, and quality. Examples: 'A modern minimalist logo for a tech startup on solid blue background', 'Professional photograph of cozy coffee shop interior, warm lighting, 16:9 aspect ratio'"
+                },
+                "aspect_ratio": {
+                    "type": "string",
+                    "description": "Image aspect ratio: '1:1' (square, social media), '4:3' (fullscreen, photography), '3:4' (portrait), '16:9' (widescreen, hero images), '9:16' (mobile portrait). Default: '1:1'",
+                    "default": "1:1"
+                },
+                "number_of_images": {
+                    "type": "number",
+                    "description": "Number of images to generate (1-4). Default: 1",
+                    "default": 1
+                },
+                "output_dir": {
+                    "type": "string",
+                    "description": "Directory to save images. For websites, use 'project-name/images'. Default: 'generated_images'",
+                    "default": "generated_images"
+                },
+                "filename": {
+                    "type": "string",
+                    "description": "Custom filename (optional). Use descriptive names like 'hero-background.png', 'logo.png'. Auto-generated if not provided.",
+                    "default": None
+                }
+            },
+            "required": ["prompt"]
+        },
+        function=generate_image
     ))
     
     return registry

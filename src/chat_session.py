@@ -7,7 +7,7 @@ and coordinating message transmission with AI providers.
 Requirements: 6.2, 6.4, 6.5
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime
 from src.provider_base import AIProvider, Message, ChatContext, Response, Model
 from src.tools import ToolRegistry, ToolCall
@@ -22,7 +22,7 @@ class ChatSession:
     and coordinates message transmission with the selected provider.
     """
     
-    def __init__(self, provider: AIProvider, model: str, context_window: Optional[int] = None, tool_registry: Optional[ToolRegistry] = None, skills_manager=None):
+    def __init__(self, provider: AIProvider, model: str, context_window: Optional[int] = None, tool_registry: Optional[ToolRegistry] = None, skills_manager=None, session_id: Optional[str] = None, skip_system_messages: bool = False):
         """
         Initialize a new chat session.
         
@@ -32,17 +32,21 @@ class ChatSession:
             context_window: Optional context window size in tokens
             tool_registry: Optional tool registry for tool calling
             skills_manager: Optional skills manager for agent skills
+            session_id: Optional session ID for resuming conversations
+            skip_system_messages: If True, skip adding system messages (for resuming sessions)
         """
         self.provider = provider
         self.model = model
         self.context_window = context_window
         self.tool_registry = tool_registry
         self.skills_manager = skills_manager
+        self.session_id = session_id
         self._messages: List[Message] = []
         self._activated_skills = set()  # Track which skills have been loaded
         
-        # Add system message for autonomous operation
-        system_prompt = """You are an autonomous AI assistant with access to tools and skills. CRITICAL INSTRUCTIONS:
+        # Only add system messages for new sessions
+        if not skip_system_messages:
+            system_prompt = """You are an autonomous AI assistant with access to tools and skills. CRITICAL INSTRUCTIONS:
 
 AUTONOMY & EXECUTION:
 1. START IMMEDIATELY - Don't overthink, begin calling tools right away
@@ -114,16 +118,16 @@ PACKAGE INSTALLATION:
 
 You have the ability to call multiple tools in one response. USE IT. Start immediately and work efficiently. Be autonomous - don't ask permission, just execute."""
 
-        self.add_message("user", system_prompt)
-        self.add_message("assistant", "Understood. I will work autonomously and complete tasks fully without asking for permission. When you say 'fix it', I'll read the files, identify issues, update everything needed, and test - all in one go. I'll create professional, high-quality outputs efficiently.")
-        
-        # Add system message with skills metadata if available
-        if self.skills_manager:
-            skills = self.skills_manager.list_skills()
-            if skills:
-                skills_content = self._build_skills_prompt(skills)
-                self.add_message("user", skills_content)
-                self.add_message("assistant", "I understand. I will activate skills as needed when working on tasks.")
+            self.add_message("user", system_prompt)
+            self.add_message("assistant", "Understood. I will work autonomously and complete tasks fully without asking for permission. When you say 'fix it', I'll read the files, identify issues, update everything needed, and test - all in one go. I'll create professional, high-quality outputs efficiently.")
+            
+            # Add system message with skills metadata if available
+            if self.skills_manager:
+                skills = self.skills_manager.list_skills()
+                if skills:
+                    skills_content = self._build_skills_prompt(skills)
+                    self.add_message("user", skills_content)
+                    self.add_message("assistant", "I understand. I will activate skills as needed when working on tasks.")
     
     def _build_skills_prompt(self, skills) -> str:
         """Build a system prompt with available skills (metadata only for progressive disclosure)."""
@@ -346,6 +350,10 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
                             if len(cmd) > 60:
                                 cmd = cmd[:57] + "..."
                             print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Command:{Style.RESET_ALL} {cmd}")
+                            # Show working directory if specified
+                            if "working_directory" in tool_args and tool_args["working_directory"] != ".":
+                                work_dir = tool_args["working_directory"]
+                                print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Directory:{Style.RESET_ALL} {work_dir}")
                             has_content = True
                         elif "name" in tool_args:
                             print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Name:{Style.RESET_ALL} {tool_args['name']}")
@@ -446,6 +454,10 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
                             if len(cmd) > 60:
                                 cmd = cmd[:57] + "..."
                             print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Command:{Style.RESET_ALL} {cmd}")
+                            # Show working directory if specified
+                            if "working_directory" in tool_args and tool_args["working_directory"] != ".":
+                                work_dir = tool_args["working_directory"]
+                                print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Directory:{Style.RESET_ALL} {work_dir}")
                             has_content = True
                         elif "name" in tool_args:
                             print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}Name:{Style.RESET_ALL} {tool_args['name']}")
@@ -579,3 +591,47 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
             The total number of messages (user + assistant)
         """
         return len(self._messages)
+    
+    def export_messages(self) -> List[Dict]:
+        """
+        Export messages to a serializable format.
+        
+        Returns:
+            List of message dictionaries
+        """
+        exported = []
+        for msg in self._messages:
+            exported.append({
+                "role": msg.role,
+                "content": msg.content,
+                "timestamp": msg.timestamp.isoformat() if msg.timestamp else None
+            })
+        return exported
+    
+    def import_messages(self, messages: List[Dict]) -> None:
+        """
+        Import messages from a serialized format.
+        
+        Args:
+            messages: List of message dictionaries
+        """
+        from datetime import datetime
+        
+        # Clear existing messages first to avoid duplicates
+        self._messages.clear()
+        
+        for msg_data in messages:
+            timestamp = None
+            if msg_data.get("timestamp"):
+                try:
+                    timestamp = datetime.fromisoformat(msg_data["timestamp"])
+                except:
+                    timestamp = datetime.now()
+            
+            message = Message(
+                role=msg_data["role"],
+                content=msg_data["content"],
+                timestamp=timestamp or datetime.now()
+            )
+            self._messages.append(message)
+            self._messages.append(message)
