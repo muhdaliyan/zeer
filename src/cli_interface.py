@@ -987,19 +987,21 @@ def display_input_prompt_with_slash_detection() -> tuple:
     from prompt_toolkit.application import get_app
     from prompt_toolkit.document import Document
     
-    # Track attached files
+    # Track attached files and whether this is first call
     attached_files = []
     current_text = ""
+    first_call = True
     
-    def show_input_prompt(default_text="", files_attached=None):
+    def show_input_prompt(default_text="", files_attached=None, show_separator=True):
         """Show input prompt with optional default text and file attachments."""
         nonlocal current_text, attached_files
         
         if files_attached is None:
             files_attached = attached_files
         
-        # Print separator BEFORE input (no extra spacing)
-        console.print(f"[dim]{'─' * WIDTH}[/dim]")
+        # Show separator before input (only on first call)
+        if show_separator:
+            console.print(f"[dim]{'─' * WIDTH}[/dim]")
         
         # Show attached files if any with removal option
         if files_attached:
@@ -1074,8 +1076,8 @@ def display_input_prompt_with_slash_detection() -> tuple:
         separator_line = '─' * WIDTH
         
         def get_bottom_toolbar():
-            # Add just 2 empty lines for minimal spacing
-            return PTK_HTML(f'<ansibrightblack>{separator_line}</ansibrightblack>\n<ansibrightblack>{toolbar_text}</ansibrightblack>\n\n\n\n\n\n')
+            # Add separator, toolbar text, and generous breathing room below (6 blank lines)
+            return PTK_HTML(f'<ansibrightblack>{separator_line}\n{toolbar_text}\n\n\n\n\n\n\n</ansibrightblack>')
         
         # Custom style to remove white background
         custom_prompt_style = PromptStyle.from_dict({
@@ -1098,20 +1100,19 @@ def display_input_prompt_with_slash_detection() -> tuple:
                 reserve_space_for_menu=0  # Don't reserve extra space
             )
             
-            # Print separator AFTER input (right below it)
-            console.print(f"[dim]{'─' * WIDTH}[/dim]")
+            # Don't print separator after - it will be printed before next prompt
             
             # Don't strip yet - return as is
             return user_input
             
         except (KeyboardInterrupt, EOFError):
-            # Print separator even on cancel
-            console.print(f"[dim]{'─' * WIDTH}[/dim]")
+            # Don't print separator on cancel
             return None
     
     # Main loop to handle input
     while True:
-        user_input = show_input_prompt(current_text, attached_files)
+        user_input = show_input_prompt(current_text, attached_files, first_call)
+        first_call = False  # Only show separator on first call
         
         if user_input is None:
             # Ctrl+C or EOF pressed - raise KeyboardInterrupt to let caller handle it
@@ -1121,7 +1122,7 @@ def display_input_prompt_with_slash_detection() -> tuple:
         if user_input == '__SHOW_COMMANDS__':
             # Clear the input area
             import sys
-            lines_to_clear = 2  # separator + input
+            lines_to_clear = 3  # separator + input + toolbar
             if attached_files:
                 lines_to_clear += len(attached_files)
             
@@ -1146,7 +1147,7 @@ def display_input_prompt_with_slash_detection() -> tuple:
                 
                 # Clear the input area
                 import sys
-                lines_to_clear = 2 + file_idx  # separator + input + files
+                lines_to_clear = 3 + len(attached_files) + 1  # separator + input + toolbar + files + removed
                 
                 for _ in range(lines_to_clear):
                     sys.stdout.write('\033[F')  # Move up
@@ -1155,6 +1156,8 @@ def display_input_prompt_with_slash_detection() -> tuple:
                 
                 print(f"{Fore.YELLOW}✓ Removed: {removed_file}{Style.RESET_ALL}")
             
+            # Reset first_call to show separator again
+            first_call = True
             # Continue to show input
             continue
         
@@ -1165,7 +1168,7 @@ def display_input_prompt_with_slash_detection() -> tuple:
             
             # Clear the input area
             import sys
-            lines_to_clear = 2  # separator + input
+            lines_to_clear = 3  # separator + input + toolbar
             if attached_files:
                 lines_to_clear += len(attached_files)
             
@@ -1179,10 +1182,13 @@ def display_input_prompt_with_slash_detection() -> tuple:
             if filepath:
                 # Add to attached files
                 attached_files.append(filepath)
+                # Reset first_call to show separator again
+                first_call = True
                 # Continue to show input with file attached and preserved text
                 continue
             else:
-                # User cancelled, continue with current state
+                # User cancelled, reset first_call to show separator again
+                first_call = True
                 continue
         
         # Now strip the input
@@ -1194,8 +1200,15 @@ def display_input_prompt_with_slash_detection() -> tuple:
             if match:
                 user_input = match
         
-        # Separator already printed by show_input_prompt
-        print()  # Just add a newline for spacing
+        # Clear only the input prompt line (the "> message" line)
+        # This removes the duplicate while keeping chat history
+        import sys
+        sys.stdout.write('\033[F')  # Move up one line (to the "> message" line)
+        sys.stdout.write('\033[K')  # Clear that line
+        sys.stdout.flush()
+        
+        # The display_user_message will show the grey bubble
+        # and the input prompt will appear after the response
         
         # If we have attached files, build the full message
         if attached_files:
@@ -1229,8 +1242,22 @@ def display_input_prompt() -> str:
 
 
 def display_user_message(message: str) -> None:
-    """Display user message - intentionally empty as we don't show user messages."""
-    pass  # Don't display user messages
+    """Display user message with grey background and black text."""
+    from colorama import Fore, Back, Style
+    
+    # Split message into lines
+    lines = message.split('\n')
+    
+    print()  # Add spacing before message
+    
+    for line in lines:
+        if line.strip():  # Only show non-empty lines
+            # Grey background with black text, only around the text
+            print(f"{Back.LIGHTBLACK_EX}{Fore.BLACK} {line} {Style.RESET_ALL}")
+        else:
+            print()  # Empty line
+    
+    print()  # Add spacing after message
 
 
 def display_assistant_message(
@@ -1240,7 +1267,7 @@ def display_assistant_message(
     elapsed_time: float = 0,
     context_window: Optional[int] = None,
 ) -> None:
-    """Display assistant message with typewriter effect and markdown rendering."""
+    """Display assistant message with markdown rendering."""
     import shutil
     import sys
     import re
@@ -1482,51 +1509,9 @@ def display_assistant_message(
     # Format the message
     formatted_parts = format_text_with_colors(clean_message)
     
-    # Calculate delay for text parts only
-    text_length = sum(len(part[1]) for part in formatted_parts if part[0] == 'TEXT')
-    max_duration = 5.0
-    
-    if text_length > 0:
-        delay_per_char = max_duration / text_length
-        delay_per_char = max(0.001, min(delay_per_char, 0.01))
-    else:
-        delay_per_char = 0.005
-    
-    # Display with typewriter effect for text, instant for code blocks
-    start_time = time.time()
-    
+    # Display all content instantly
     for part_type, content in formatted_parts:
-        if part_type == 'CODE_BLOCK':
-            # Print code blocks instantly (no typewriter effect)
-            print(content)
-        else:
-            # Apply typewriter effect to text
-            i = 0
-            while i < len(content):
-                # Check if we've exceeded 5 seconds
-                if time.time() - start_time > max_duration:
-                    sys.stdout.write(content[i:])
-                    sys.stdout.flush()
-                    break
-                
-                char = content[i]
-                
-                # Check if this is the start of an ANSI escape sequence
-                if char == '\x1b' and i + 1 < len(content) and content[i + 1] == '[':
-                    # Find the end of the ANSI sequence
-                    end = i + 2
-                    while end < len(content) and content[end] != 'm':
-                        end += 1
-                    # Print the entire ANSI sequence at once
-                    sys.stdout.write(content[i:end + 1])
-                    sys.stdout.flush()
-                    i = end + 1
-                else:
-                    # Regular character
-                    sys.stdout.write(char)
-                    sys.stdout.flush()
-                    time.sleep(delay_per_char)
-                    i += 1
+        print(content, end='')
     
     print("\n")  # New line after message
     
@@ -1601,6 +1586,10 @@ class RunningIndicator:
         self.thread.start()
 
     def stop(self) -> float:
+        if not self.running:
+            # Already stopped, return elapsed time
+            return time.time() - self.start_time if self.start_time else 0
+        
         self.running = False
         if self.thread:
             self.thread.join(timeout=0.5)

@@ -40,6 +40,7 @@ class Response:
     usage: Optional[Dict[str, int]] = None  # promptTokens, completionTokens, totalTokens
     tool_calls: Optional[List[Dict[str, Any]]] = None  # Tool calls from the model
     images: Optional[List[Dict[str, Any]]] = None  # Generated images (base64 data, mime type, etc.)
+    streamed: bool = False  # Flag to indicate if content was already streamed to console
 
 
 @dataclass
@@ -96,6 +97,21 @@ class AIProvider(ABC):
             Response object containing the AI's reply
         """
         pass
+    
+    async def send_message_stream(self, message: str, context: ChatContext):
+        """
+        Send a message to the AI model and stream the response.
+        
+        Args:
+            message: The user's message
+            context: The conversation context including history
+            
+        Yields:
+            Chunks of the response (text or tool calls)
+        """
+        # Default implementation: fall back to non-streaming
+        response = await self.send_message(message, context)
+        yield response
     
     @abstractmethod
     def get_name(self) -> str:

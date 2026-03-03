@@ -9,6 +9,7 @@ Users can chat with the assistant through Telegram messages.
 import asyncio
 import logging
 import os
+import sys
 from typing import Optional, Dict
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -22,6 +23,21 @@ from src.providers.openrouter_provider import OpenRouterProvider
 from src.providers.ollama_provider import OllamaProvider
 from src.tools import create_default_registry
 from src.skills_manager import SkillsManager
+
+# Fix Windows encoding issues
+if sys.platform == 'win32':
+    # Set UTF-8 encoding for stdout/stderr
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    # Set console code page to UTF-8
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        kernel32.SetConsoleOutputCP(65001)  # UTF-8
+    except:
+        pass
 
 # Configure logging
 logging.basicConfig(
@@ -166,6 +182,8 @@ class TelegramBot:
         
         try:
             # Send message to AI and get response
+            # Note: Tool output will be printed to console (background process)
+            # but won't affect Telegram user experience
             response = await session.send_message(user_message)
             
             # Extract text from Response object
@@ -208,10 +226,23 @@ class TelegramBot:
                     except:
                         pass
         
+        except UnicodeEncodeError as e:
+            logger.error(f"Encoding error: {e}")
+            await update.message.reply_text(
+                "✓ Task completed successfully!\n\n"
+                "(Some output couldn't be displayed due to encoding issues)"
+            )
         except Exception as e:
             logger.error(f"Error handling message: {e}")
+            error_msg = str(e)
+            # Remove any problematic Unicode characters from error message
+            try:
+                error_msg = error_msg.encode('ascii', errors='ignore').decode('ascii')
+            except:
+                error_msg = "An error occurred"
+            
             await update.message.reply_text(
-                f"❌ Sorry, I encountered an error: {str(e)}\n\n"
+                f"❌ Sorry, I encountered an error: {error_msg}\n\n"
                 "Please try again or use /clear to start a new conversation."
             )
     

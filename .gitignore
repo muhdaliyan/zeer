@@ -51,6 +51,7 @@ generated_images/
 # Temporary files
 *.tmp
 *.log
+telegram_bot.log
 
 # Environment variables (contains sensitive tokens)
 .env

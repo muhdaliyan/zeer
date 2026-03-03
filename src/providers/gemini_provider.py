@@ -128,6 +128,231 @@ class GeminiProvider(AIProvider):
         except requests.exceptions.RequestException as e:
             raise Exception(f"Failed to fetch Gemini models: {str(e)}")
     
+    async def send_message_stream(self, message: str, context: ChatContext):
+        """
+        Send a message to Gemini and stream the response.
+        
+        Args:
+            message: The user's message
+            context: The conversation context
+            
+        Yields:
+            Chunks of text or complete Response with tool calls
+        """
+        import json
+        
+        # Build contents array from context
+        contents = []
+        for msg in context.messages:
+            # Handle tool call messages (stored with special format)
+            if msg.role == "assistant" and msg.content.startswith("__TOOL_CALLS__:"):
+                # Reconstruct assistant message with function calls
+                tool_calls_json = msg.content.replace("__TOOL_CALLS__:", "")
+                try:
+                    tool_calls = json.loads(tool_calls_json)
+                except json.JSONDecodeError:
+                    continue
+                
+                # Convert to Gemini format
+                parts = []
+                for tool_call in tool_calls:
+                    func_name = tool_call["function"]["name"]
+                    func_args = json.loads(tool_call["function"]["arguments"])
+                    
+                    part = {
+                        "functionCall": {
+                            "name": func_name,
+                            "args": func_args
+                        }
+                    }
+                    
+                    if "thought_signature" in tool_call:
+                        part["thoughtSignature"] = tool_call["thought_signature"]
+                    
+                    parts.append(part)
+                
+                if parts:
+                    contents.append({
+                        "role": "model",
+                        "parts": parts
+                    })
+            elif msg.role == "tool" and "__TOOL_CALL_ID__:" in msg.content:
+                # Reconstruct tool response message
+                parts_split = msg.content.split(":", 2)
+                if len(parts_split) < 2:
+                    continue
+                    
+                tool_call_id = parts_split[1]
+                content = parts_split[2] if len(parts_split) > 2 else ""
+                
+                # Extract function name from tool_call_id
+                func_name = tool_call_id.replace("call_", "")
+                
+                contents.append({
+                    "role": "user",
+                    "parts": [{
+                        "functionResponse": {
+                            "name": func_name,
+                            "response": {
+                                "content": content
+                            }
+                        }
+                    }]
+                })
+            else:
+                # Gemini uses "user" and "model" roles
+                role = "model" if msg.role == "assistant" else "user"
+                
+                # Skip empty messages
+                if not msg.content or not msg.content.strip():
+                    continue
+                
+                contents.append({
+                    "role": role,
+                    "parts": [{"text": msg.content}]
+                })
+        
+        # Build request payload
+        payload = {"contents": contents}
+        
+        # Add tools if available
+        if hasattr(context, 'tools') and context.tools:
+            gemini_tools = self._convert_tools_to_gemini_format(context.tools)
+            if gemini_tools:
+                payload["tools"] = gemini_tools
+                payload["tool_config"] = {
+                    "function_calling_config": {
+                        "mode": "AUTO"
+                    }
+                }
+        
+        # Add generation config
+        payload["generationConfig"] = {
+            "temperature": 0.7,
+            "maxOutputTokens": 8192
+        }
+        
+        # Make streaming API request
+        api_url = f"{self.BASE_URL_BETA}/models/{context.model}:streamGenerateContent"
+        
+        try:
+            response = requests.post(
+                api_url,
+                params={"key": self.api_key, "alt": "sse"},
+                json=payload,
+                timeout=60,
+                stream=True
+            )
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"Request failed: {str(e)}")
+        
+        if response.status_code != 200:
+            try:
+                error_data = response.json() if response.text else {}
+                error_msg = error_data.get("error", {}).get("message", response.text)
+            except:
+                error_msg = response.text
+            raise Exception(f"Gemini API error ({response.status_code}): {error_msg}")
+        
+        # Parse SSE stream
+        accumulated_content = ""
+        accumulated_function_calls = []
+        accumulated_images = []
+        usage_info = None
+        
+        for line in response.iter_lines():
+            if not line:
+                continue
+            
+            line = line.decode('utf-8')
+            
+            # SSE format: "data: {json}"
+            if line.startswith("data: "):
+                data_str = line[6:]
+                
+                try:
+                    data = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                
+                candidates = data.get("candidates", [])
+                if not candidates:
+                    continue
+                
+                candidate = candidates[0]
+                
+                if "content" not in candidate:
+                    continue
+                
+                content = candidate.get("content", {})
+                if "parts" not in content:
+                    continue
+                
+                parts = content["parts"]
+                
+                for part in parts:
+                    if "functionCall" in part:
+                        # Gemini wants to call a function
+                        func_call = part["functionCall"]
+                        func_name = func_call["name"]
+                        thought_signature = part.get("thoughtSignature")
+                        
+                        function_call_obj = {
+                            "id": f"call_{func_name}",
+                            "type": "function",
+                            "function": {
+                                "name": func_name,
+                                "arguments": json.dumps(func_call.get("args", {}))
+                            }
+                        }
+                        
+                        if thought_signature:
+                            function_call_obj["thought_signature"] = thought_signature
+                        
+                        accumulated_function_calls.append(function_call_obj)
+                    elif "text" in part:
+                        text_content = part["text"]
+                        accumulated_content += text_content
+                        yield {"type": "content", "content": text_content}
+                    elif "inlineData" in part:
+                        inline_data = part["inlineData"]
+                        accumulated_images.append({
+                            "data": inline_data.get("data", ""),
+                            "mimeType": inline_data.get("mimeType", "image/png")
+                        })
+                
+                # Extract usage if available
+                if "usageMetadata" in data:
+                    metadata = data["usageMetadata"]
+                    usage_info = {
+                        "promptTokens": metadata.get("promptTokenCount", 0),
+                        "completionTokens": metadata.get("candidatesTokenCount", 0),
+                        "totalTokens": metadata.get("totalTokenCount", 0)
+                    }
+        
+        # Yield final response
+        if accumulated_function_calls:
+            yield {
+                "type": "tool_calls",
+                "response": Response(
+                    content=accumulated_content,
+                    model=context.model,
+                    usage=usage_info,
+                    tool_calls=accumulated_function_calls,
+                    images=accumulated_images if accumulated_images else None
+                )
+            }
+        else:
+            yield {
+                "type": "done",
+                "response": Response(
+                    content=accumulated_content,
+                    model=context.model,
+                    usage=usage_info,
+                    images=accumulated_images if accumulated_images else None
+                )
+            }
+    
     async def send_message(self, message: str, context: ChatContext) -> Response:
         """
         Send a message to Gemini and receive a response.

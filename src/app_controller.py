@@ -17,7 +17,7 @@ from src.cli_interface import (
     display_success, display_info, display_separator,
     display_user_message, display_assistant_message,
     RunningIndicator, prompt_slash_command, display_input_prompt,
-    display_input_prompt_with_slash_detection, clear_screen
+    display_input_prompt_with_slash_detection, clear_screen, WIDTH
 )
 from colorama import Fore, Style
 from src.validation import validate_provider_selection, validate_api_key, validate_model_selection
@@ -217,7 +217,28 @@ class AppController:
             self._chat_loop(show_welcome=False)
             
         except KeyboardInterrupt:
-            print("\n\nExiting zeer. Goodbye!")
+            # User pressed Ctrl+C to exit
+            import sys
+            
+            print()  # Blank line
+            
+            # Save session if there's a chat session with messages
+            if self.chat_session:
+                message_count = self.chat_session.get_message_count()
+                
+                if message_count > 0:
+                    print(f"{Fore.CYAN}Saving session...{Style.RESET_ALL}")
+                    sys.stdout.flush()
+                    
+                    session_id = self._save_current_session()
+                    if session_id:
+                        print(f"{Fore.GREEN}✓ Session saved!{Style.RESET_ALL}")
+                        print(f"{Fore.CYAN}Resume with:{Style.RESET_ALL} zeer chat {session_id}")
+                        sys.stdout.flush()
+            
+            print(f"\n{Fore.CYAN}Goodbye!{Style.RESET_ALL}\n")
+            sys.stdout.flush()
+            
         except Exception as e:
             display_error(f"Unexpected error: {str(e)}")
         finally:
@@ -729,18 +750,18 @@ class AppController:
                             
                             # Confirm if there's an existing chat session
                             if self.chat_session and self.chat_session.get_message_count() > 2:  # More than system messages
-                                print(f"{Fore.YELLOW}⚠ Warning: Changing models will save your current chat session.{Style.RESET_ALL}")
-                                
-                                # Save current session
-                                session_id = self._save_current_session()
-                                if session_id:
-                                    print(f"{Fore.GREEN}✓ Session saved!{Style.RESET_ALL}")
-                                    print(f"{Fore.CYAN}Resume with:{Style.RESET_ALL} zeer chat {session_id}\n")
+                                print(f"{Fore.YELLOW}⚠ Warning: Changing models will save your current chat session.{Style.RESET_ALL}\n")
                                 
                                 confirm = input(f"{Fore.CYAN}Continue to change model? (y/n):{Style.RESET_ALL} ").strip().lower()
                                 if confirm != 'y' and confirm != 'yes':
                                     display_info("Cancelled. Keeping current model.")
                                     continue
+                                
+                                # Save current session AFTER user confirms
+                                session_id = self._save_current_session()
+                                if session_id:
+                                    print(f"\n{Fore.GREEN}✓ Session saved!{Style.RESET_ALL}")
+                                    print(f"{Fore.CYAN}Resume with:{Style.RESET_ALL} zeer chat {session_id}\n")
                             
                             model = self._select_model()
                             if model:
@@ -888,7 +909,7 @@ class AppController:
                     # Send message and get response (pass indicator for control during tool execution)
                     response = asyncio.run(self.chat_session.send_message(user_message, indicator))
                     
-                    # Stop indicator and get elapsed time
+                    # Stop indicator if still running and get elapsed time
                     elapsed_time = indicator.stop()
                     
                     # Check if user cancelled during thinking
@@ -902,14 +923,41 @@ class AppController:
                         for path in saved_paths:
                             display_image_in_terminal(path)
                     
-                    # Display assistant response with metadata
-                    display_assistant_message(
-                        response.content,
-                        self.session_manager.get_model(),
-                        response.usage,
-                        elapsed_time,
-                        self.chat_session.context_window
-                    )
+                    # Display assistant response with metadata (skip content if already streamed)
+                    if hasattr(response, 'streamed') and response.streamed:
+                        # Content was already streamed, just show metadata
+                        from rich.console import Console
+                        console = Console()
+                        
+                        # Build metadata line
+                        metadata_parts = []
+                        metadata_parts.append(f"{self.session_manager.get_model()}")
+                        metadata_parts.append(f"{elapsed_time:.1f}s")
+                        
+                        if response.usage:
+                            completion_tokens = response.usage.get('completionTokens', 0)
+                            if completion_tokens > 0:
+                                metadata_parts.append(f"{completion_tokens:,} tokens")
+                            
+                            prompt_tokens = response.usage.get('promptTokens', 0)
+                            if prompt_tokens > 0:
+                                context_window = self.chat_session.context_window
+                                if context_window and context_window > 0:
+                                    context_pct = (prompt_tokens / context_window) * 100
+                                    metadata_parts.append(f"{context_pct:.1f}% context")
+                                else:
+                                    metadata_parts.append(f"{prompt_tokens:,} context tokens")
+                        
+                        console.print(f"[dim]{' • '.join(metadata_parts)}[/dim]\n")
+                    else:
+                        # Display full response with formatting
+                        display_assistant_message(
+                            response.content,
+                            self.session_manager.get_model(),
+                            response.usage,
+                            elapsed_time,
+                            self.chat_session.context_window
+                        )
                 except KeyboardInterrupt:
                     # Stop indicator and cancel operation, but don't exit
                     indicator.stop()
@@ -938,47 +986,48 @@ class AppController:
                 # Double Ctrl+C to exit
                 current_time = time.time()
                 if current_time - last_ctrl_c_time < ctrl_c_timeout:
-                    # Second Ctrl+C within timeout - exit immediately
-                    print(f"\n\n{Fore.CYAN}Exiting zeer. Goodbye!{Style.RESET_ALL}")
-                    break
-                else:
-                    # First Ctrl+C - save session and show exit message
-                    last_ctrl_c_time = current_time
+                    # Second Ctrl+C within timeout - save session and exit
                     import sys
                     
-                    # Save session if there's content
-                    session_id = None
-                    if self.chat_session and self.chat_session.get_message_count() > 2:
-                        session_id = self._save_current_session()
+                    print()  # Blank line
                     
-                    # Show message with session info if saved
-                    if session_id:
-                        sys.stdout.write(f"\n{Fore.GREEN}✓ Session saved!{Style.RESET_ALL} Resume with: {Fore.CYAN}zeer chat {session_id}{Style.RESET_ALL}")
-                        sys.stdout.write(f"\n{Fore.YELLOW}Press Ctrl+C again within 2 seconds to exit{Style.RESET_ALL}")
-                    else:
-                        sys.stdout.write(f"\n{Fore.YELLOW}Press Ctrl+C again within 2 seconds to exit{Style.RESET_ALL}")
+                    # Save session if there's a chat session
+                    if self.chat_session:
+                        message_count = self.chat_session.get_message_count()
+                        
+                        # Only save if there are actual messages (more than just system messages)
+                        if message_count > 0:
+                            print(f"{Fore.CYAN}Saving session...{Style.RESET_ALL}")
+                            sys.stdout.flush()
+                            
+                            session_id = self._save_current_session()
+                            if session_id:
+                                print(f"{Fore.GREEN}✓ Session saved!{Style.RESET_ALL}")
+                                print(f"{Fore.CYAN}Resume with:{Style.RESET_ALL} zeer chat {session_id}")
+                                sys.stdout.flush()
+                            else:
+                                print(f"{Fore.YELLOW}⚠ Could not save session{Style.RESET_ALL}")
+                                sys.stdout.flush()
+                        else:
+                            print(f"{Fore.LIGHTBLACK_EX}(No messages to save){Style.RESET_ALL}")
+                            sys.stdout.flush()
+                    
+                    print(f"\n{Fore.CYAN}Goodbye!{Style.RESET_ALL}\n")
                     sys.stdout.flush()
+                    break
+                else:
+                    # First Ctrl+C - just show exit message (don't save yet)
+                    last_ctrl_c_time = current_time
+                    
+                    print()  # Add newline before message
+                    print(f"{Fore.YELLOW}Press Ctrl+C again within 2 seconds to exit{Style.RESET_ALL}")
+                    print()  # Add newline after message
                     
                     # Wait 2 seconds
                     time.sleep(2.0)
                     
-                    # Clear the message lines
-                    if session_id:
-                        # Clear 2 lines (session saved + exit message)
-                        sys.stdout.write('\r' + ' ' * 100 + '\r')  # Clear current line
-                        sys.stdout.write('\033[F')  # Move up one line
-                        sys.stdout.write('\r' + ' ' * 100 + '\r')  # Clear that line
-                        sys.stdout.write('\033[F')  # Move up one more line
-                        sys.stdout.write('\r' + ' ' * 100 + '\r')  # Clear that line too
-                    else:
-                        # Clear 1 line (just exit message)
-                        sys.stdout.write('\r' + ' ' * 100 + '\r')  # Clear line
-                        sys.stdout.write('\033[F')  # Move up one line
-                        sys.stdout.write('\r' + ' ' * 100 + '\r')  # Clear that line too
-                    sys.stdout.flush()
-                    
-                    # Reset the timer since 2 seconds passed
-                    last_ctrl_c_time = 0
+                    # Don't clear - just continue to show next prompt
+                    # Continue to next iteration (will show input prompt)
                     continue
                 
             except Exception as e:
@@ -1566,12 +1615,14 @@ class AppController:
         
         try:
             # Start bot in background using subprocess
-            # Use DEVNULL to suppress output
+            # Redirect output to log file for debugging
+            log_file = open('telegram_bot.log', 'w', encoding='utf-8')
+            
             self.telegram_bot_process = subprocess.Popen(
                 [sys.executable, "-m", "src.telegram_bot"],
                 env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,  # Combine stderr with stdout
                 stdin=subprocess.DEVNULL
             )
             
@@ -1582,9 +1633,11 @@ class AppController:
             # Check if process is still running
             if self.telegram_bot_process.poll() is None:
                 print(f"{Fore.GREEN}✓ Telegram bot started in background{Style.RESET_ALL}")
-                print(f"{Fore.LIGHTBLACK_EX}  Bot will stop when you exit zeer{Style.RESET_ALL}\n")
+                print(f"{Fore.LIGHTBLACK_EX}  Bot will stop when you exit zeer{Style.RESET_ALL}")
+                print(f"{Fore.LIGHTBLACK_EX}  Logs: telegram_bot.log{Style.RESET_ALL}\n")
                 return True
             else:
+                log_file.close()
                 self.telegram_bot_process = None
                 return False
                 

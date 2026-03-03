@@ -94,6 +94,156 @@ class ClaudeProvider(AIProvider):
         
         return models
     
+    async def send_message_stream(self, message: str, context: ChatContext):
+        """
+        Send a message to Claude and stream the response.
+        
+        Args:
+            message: The user's message
+            context: The conversation context
+            
+        Yields:
+            Chunks of text or complete Response with tool calls
+        """
+        import json
+        
+        # Build messages array from context
+        messages = []
+        for msg in context.messages:
+            messages.append({
+                "role": msg.role,
+                "content": msg.content
+            })
+        
+        # Build request payload
+        payload = {
+            "model": context.model,
+            "max_tokens": 4096,
+            "messages": messages,
+            "stream": True
+        }
+        
+        # Add tools if available
+        if hasattr(context, 'tools') and context.tools:
+            claude_tools = self._convert_tools_to_claude_format(context.tools)
+            if claude_tools:
+                payload["tools"] = claude_tools
+        
+        # Make streaming API request
+        response = requests.post(
+            f"{self.BASE_URL}/messages",
+            headers=self.headers,
+            json=payload,
+            timeout=60,
+            stream=True
+        )
+        response.raise_for_status()
+        
+        # Parse SSE stream
+        accumulated_content = ""
+        accumulated_tool_calls = []
+        current_tool_call = None
+        usage_info = None
+        
+        for line in response.iter_lines():
+            if not line:
+                continue
+            
+            line = line.decode('utf-8')
+            
+            # SSE format: "event: {type}\ndata: {json}"
+            if line.startswith("event: "):
+                event_type = line[7:]
+                continue
+            
+            if line.startswith("data: "):
+                data_str = line[6:]
+                
+                try:
+                    data = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                
+                event_type = data.get("type")
+                
+                # Handle different event types
+                if event_type == "content_block_start":
+                    block = data.get("content_block", {})
+                    if block.get("type") == "tool_use":
+                        # Start of a tool call
+                        current_tool_call = {
+                            "id": block.get("id", ""),
+                            "type": "function",
+                            "function": {
+                                "name": block.get("name", ""),
+                                "arguments": ""
+                            }
+                        }
+                
+                elif event_type == "content_block_delta":
+                    delta = data.get("delta", {})
+                    
+                    if delta.get("type") == "text_delta":
+                        # Text content
+                        text = delta.get("text", "")
+                        accumulated_content += text
+                        yield {"type": "content", "content": text}
+                    
+                    elif delta.get("type") == "input_json_delta":
+                        # Tool call arguments
+                        if current_tool_call:
+                            current_tool_call["function"]["arguments"] += delta.get("partial_json", "")
+                
+                elif event_type == "content_block_stop":
+                    # End of content block
+                    if current_tool_call:
+                        accumulated_tool_calls.append(current_tool_call)
+                        current_tool_call = None
+                
+                elif event_type == "message_delta":
+                    # Usage information
+                    usage = data.get("usage", {})
+                    if usage:
+                        if not usage_info:
+                            usage_info = {
+                                "promptTokens": 0,
+                                "completionTokens": 0,
+                                "totalTokens": 0
+                            }
+                        usage_info["completionTokens"] += usage.get("output_tokens", 0)
+                
+                elif event_type == "message_start":
+                    # Initial message with usage
+                    message_data = data.get("message", {})
+                    usage = message_data.get("usage", {})
+                    if usage:
+                        usage_info = {
+                            "promptTokens": usage.get("input_tokens", 0),
+                            "completionTokens": usage.get("output_tokens", 0),
+                            "totalTokens": usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+                        }
+        
+        # Yield final response
+        if accumulated_tool_calls:
+            yield {
+                "type": "tool_calls",
+                "response": Response(
+                    content=accumulated_content,
+                    model=context.model,
+                    usage=usage_info,
+                    tool_calls=accumulated_tool_calls
+                )
+            }
+        else:
+            yield {
+                "type": "done",
+                "response": Response(
+                    content=accumulated_content,
+                    model=context.model,
+                    usage=usage_info
+                )
+            }
+    
     async def send_message(self, message: str, context: ChatContext) -> Response:
         """
         Send a message to Claude and receive a response.

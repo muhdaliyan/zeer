@@ -259,7 +259,7 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
     
     async def send_message(self, message: str, indicator=None) -> Response:
         """
-        Send a message to the AI provider and receive a response.
+        Send a message to the AI provider and receive a response with streaming.
         
         This method adds the user message to history, sends it to the provider
         with full conversation context, receives the response, handles tool calls
@@ -278,6 +278,7 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
         from colorama import Fore, Style
         import json
         from src.config import get_config
+        import sys
         
         # Load configuration
         config = get_config()
@@ -306,8 +307,71 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
             # Get current context with tools
             context = self.get_context()
             
-            # Send message to provider (empty string for continuation)
-            response = await self.provider.send_message("" if iteration > 1 else message, context)
+            # Stream message from provider
+            accumulated_content = ""
+            final_response = None
+            first_chunk_received = False
+            
+            # Buffer for markdown parsing during streaming
+            stream_buffer = ""
+            
+            async for chunk in self.provider.send_message_stream("" if iteration > 1 else message, context):
+                chunk_type = chunk.get("type")
+                
+                if chunk_type == "content":
+                    # Stop the thinking indicator on first content chunk
+                    if not first_chunk_received and indicator:
+                        indicator.stop()
+                        first_chunk_received = True
+                    
+                    # Stream text content with real-time markdown formatting
+                    content = chunk.get("content", "")
+                    accumulated_content += content
+                    
+                    # Add to buffer and process markdown
+                    stream_buffer += content
+                    
+                    # Process and display formatted chunks
+                    formatted_output, stream_buffer = self._format_streaming_markdown(stream_buffer)
+                    if formatted_output:
+                        sys.stdout.write(formatted_output)
+                        sys.stdout.flush()
+                
+                elif chunk_type in ["tool_calls", "done"]:
+                    # Stop indicator if not already stopped
+                    if not first_chunk_received and indicator:
+                        indicator.stop()
+                        first_chunk_received = True
+                    
+                    # Flush any remaining buffer
+                    if stream_buffer:
+                        sys.stdout.write(stream_buffer)
+                        sys.stdout.flush()
+                    
+                    # Final response received
+                    final_response = chunk.get("response")
+                    break
+            
+            # Print newline after streaming to separate from next output
+            if accumulated_content:
+                print("\n")
+            
+            # Use the final response
+            response = final_response
+            
+            if not response:
+                # Fallback to non-streaming if streaming failed
+                response = await self.provider.send_message("" if iteration > 1 else message, context)
+            else:
+                # Mark response as already streamed to avoid duplicate display
+                response = Response(
+                    content=response.content,
+                    model=response.model,
+                    usage=response.usage,
+                    tool_calls=response.tool_calls,
+                    images=response.images,
+                    streamed=True  # Flag that content was already displayed
+                )
             
             # Check if model wants to call tools
             if response.tool_calls and self.tool_registry:
@@ -387,13 +451,12 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
                             # Show output for certain tools that users want to see
                             display_output_tools = ['list_directory', 'get_current_directory', 'read_file']
                             if tool_name in display_output_tools and result.output:
-                                # Display the output in a readable format
-                                output_lines = result.output.split('\n')
-                                for line in output_lines[:20]:  # Limit to first 20 lines
-                                    if line.strip():
-                                        print(f"{Fore.CYAN}│{Style.RESET_ALL} {line}")
-                                if len(output_lines) > 20:
-                                    print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}... ({len(output_lines) - 20} more lines){Style.RESET_ALL}")
+                                # Display the output in a readable format - show only 2 lines
+                                output_lines = [line for line in result.output.split('\n') if line.strip()]
+                                for line in output_lines[:2]:  # Show only first 2 lines
+                                    print(f"{Fore.CYAN}│{Style.RESET_ALL} {line}")
+                                if len(output_lines) > 2:
+                                    print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}+{len(output_lines) - 2} more lines{Style.RESET_ALL}")
                         
                         # Close the box
                         # No bottom border
@@ -491,13 +554,12 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
                             # Show output for certain tools that users want to see
                             display_output_tools = ['list_directory', 'get_current_directory', 'read_file']
                             if tool_name in display_output_tools and result.output:
-                                # Display the output in a readable format
-                                output_lines = result.output.split('\n')
-                                for line in output_lines[:20]:  # Limit to first 20 lines
-                                    if line.strip():
-                                        print(f"{Fore.CYAN}│{Style.RESET_ALL} {line}")
-                                if len(output_lines) > 20:
-                                    print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}... ({len(output_lines) - 20} more lines){Style.RESET_ALL}")
+                                # Display the output in a readable format - show only 2 lines
+                                output_lines = [line for line in result.output.split('\n') if line.strip()]
+                                for line in output_lines[:2]:  # Show only first 2 lines
+                                    print(f"{Fore.CYAN}│{Style.RESET_ALL} {line}")
+                                if len(output_lines) > 2:
+                                    print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}+{len(output_lines) - 2} more lines{Style.RESET_ALL}")
                         
                         # Close the box
                         # No bottom border
@@ -638,3 +700,153 @@ You have the ability to call multiple tools in one response. USE IT. Start immed
             )
             self._messages.append(message)
             self._messages.append(message)
+
+    def _format_streaming_markdown(self, buffer: str) -> tuple[str, str]:
+        """
+        Format markdown in real-time during streaming.
+        Returns formatted output and remaining buffer.
+        
+        Args:
+            buffer: Accumulated text buffer
+            
+        Returns:
+            Tuple of (formatted_output, remaining_buffer)
+        """
+        import re
+        from colorama import Fore, Style
+        
+        output = ""
+        remaining = buffer
+        
+        # First, strip HTML tags and convert to plain markdown
+        # Remove <span> tags with style attributes but keep the content
+        remaining = re.sub(r'<span[^>]*>', '', remaining)
+        remaining = re.sub(r'</span>', '', remaining)
+        
+        # Remove other HTML tags
+        remaining = re.sub(r'<[^>]+>', '', remaining)
+        
+        # Process complete markdown patterns
+        # We need to be careful to only process complete patterns
+        
+        # Headers: ### text or ## text or # text
+        if '\n' in remaining or not remaining.endswith('#'):
+            header_pattern = r'^(#{1,6})\s+(.+)$'
+            lines = remaining.split('\n')
+            processed_lines = []
+            
+            for line in lines:
+                header_match = re.match(header_pattern, line)
+                if header_match:
+                    level = len(header_match.group(1))
+                    text = header_match.group(2)
+                    # Color headers in magenta
+                    processed_lines.append(f"{Fore.MAGENTA}{text}{Style.RESET_ALL}")
+                else:
+                    processed_lines.append(line)
+            
+            remaining = '\n'.join(processed_lines)
+        
+        # Bold: **text** (need both opening and closing)
+        bold_pattern = r'\*\*([^*]+?)\*\*'
+        matches = list(re.finditer(bold_pattern, remaining))
+        if matches:
+            last_match_end = 0
+            temp_output = ""
+            for match in matches:
+                # Add text before match
+                temp_output += remaining[last_match_end:match.start()]
+                # Add formatted bold text
+                temp_output += f"{Fore.CYAN}{match.group(1)}{Style.RESET_ALL}"
+                last_match_end = match.end()
+            
+            # Check if there's an incomplete pattern at the end
+            rest = remaining[last_match_end:]
+            if rest.count('**') % 2 == 1:  # Odd number of ** means incomplete
+                # Find last **
+                last_star_pos = rest.rfind('**')
+                if last_star_pos != -1:
+                    output += temp_output + rest[:last_star_pos]
+                    return output, rest[last_star_pos:]
+            
+            output += temp_output
+            remaining = rest
+        
+        # Inline code: `text`
+        code_pattern = r'`([^`]+?)`'
+        matches = list(re.finditer(code_pattern, remaining))
+        if matches:
+            last_match_end = 0
+            temp_output = ""
+            for match in matches:
+                temp_output += remaining[last_match_end:match.start()]
+                temp_output += f"{Fore.YELLOW}{match.group(1)}{Style.RESET_ALL}"
+                last_match_end = match.end()
+            
+            rest = remaining[last_match_end:]
+            if rest.count('`') % 2 == 1:  # Odd number of ` means incomplete
+                last_tick_pos = rest.rfind('`')
+                if last_tick_pos != -1:
+                    output += temp_output + rest[:last_tick_pos]
+                    return output, rest[last_tick_pos:]
+            
+            output += temp_output
+            remaining = rest
+        
+        # Bullet points: * or - or numbered lists
+        if '\n' in remaining or not remaining.strip().endswith(('*', '-', '.')):
+            lines = remaining.split('\n')
+            formatted_lines = []
+            
+            for i, line in enumerate(lines):
+                # Bullet points
+                if re.match(r'^\s*[•\*\-]\s+', line):
+                    formatted_line = re.sub(r'^(\s*)([•\*\-])(\s+)', 
+                                          f'\\1{Fore.CYAN}•{Style.RESET_ALL}\\3', 
+                                          line)
+                    formatted_lines.append(formatted_line)
+                # Numbered lists
+                elif re.match(r'^\s*\d+\.\s+', line):
+                    formatted_line = re.sub(r'^(\s*)(\d+\.)(\s+)', 
+                                          f'\\1{Fore.CYAN}\\2{Style.RESET_ALL}\\3', 
+                                          line)
+                    formatted_lines.append(formatted_line)
+                # Horizontal rules
+                elif re.match(r'^-{3,}$', line.strip()):
+                    formatted_lines.append(f"{Fore.LIGHTBLACK_EX}{'─' * 80}{Style.RESET_ALL}")
+                # Block quotes
+                elif line.strip().startswith('>'):
+                    formatted_line = re.sub(r'^(\s*)(>)(\s*)', 
+                                          f'\\1{Fore.LIGHTBLACK_EX}│{Style.RESET_ALL}\\3', 
+                                          line)
+                    formatted_lines.append(f"{Fore.LIGHTBLACK_EX}{formatted_line}{Style.RESET_ALL}")
+                else:
+                    formatted_lines.append(line)
+            
+            # Join lines
+            output += '\n'.join(formatted_lines)
+            
+            # Keep last line in buffer if it doesn't end with newline and might be incomplete
+            if not buffer.endswith('\n'):
+                last_line = formatted_lines[-1] if formatted_lines else ""
+                # Check if last line might be incomplete markdown
+                if any(last_line.endswith(char) for char in ['*', '`', '-', '#', ' ', '.']):
+                    # Check if it's really incomplete (not just ending with these chars)
+                    if len(last_line.strip()) < 3:
+                        # Very short line, might be incomplete
+                        if len(formatted_lines) > 1:
+                            output = '\n'.join(formatted_lines[:-1]) + '\n'
+                            return output, lines[-1]
+                        else:
+                            return "", lines[-1]
+            
+            return output, ""
+        
+        # If we get here, buffer might have incomplete patterns
+        # Check for incomplete patterns at the end
+        if remaining.endswith(('*', '`', '-', '#', '<')):
+            # Keep last few characters in buffer
+            if len(remaining) > 2:
+                return remaining[:-2], remaining[-2:]
+        
+        return remaining, ""
