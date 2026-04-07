@@ -25,7 +25,9 @@
 **Zeer** is an OpenSource agentic AI CLI that connects to multiple providers (OpenAI, Gemini, Claude, Ollama) with **tool-calling capabilities**, an **extensible skills system**, and a **clean box-style UI**.  
 
 
-<img src="https://i.ibb.co/sxRF8qQ/image.png" alt="image" border="0">
+<p align="center">
+  <img src="./src/UI.png" alt="UI Preview" width="800"/>
+</p>
 
 ---
 
