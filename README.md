@@ -1,4 +1,6 @@
-# Zeer
+<div align="center">
+
+<em>An agentic AI CLI that connects to multiple AI providers, featuring tool-calling, an extensible skills system, and seamless remote access from anywhere.</em>
 
 [![PyPI version](https://img.shields.io/pypi/v/zeer?color=blue&label=pypi)](https://pypi.org/project/zeer/)
 [![Python](https://img.shields.io/pypi/pyversions/zeer?color=blue)](https://pypi.org/project/zeer/)
@@ -7,9 +9,21 @@
 [![Downloads](https://img.shields.io/pypi/dm/zeer?color=blue)](https://pypi.org/project/zeer/)
 [![GitHub stars](https://img.shields.io/github/stars/muhdaliyan/zeer?style=social)](https://github.com/muhdaliyan/zeer)
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/muhdaliyan/zeer)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-0A66C2?style=flat-square&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/muhdaliyan/)
+[![X](https://img.shields.io/badge/X-Follow-000000?style=flat-square&logo=x&logoColor=white)](https://x.com/muhdaliyan_)
+[![Bluesky](https://img.shields.io/badge/Bluesky-Follow-0285FF?style=flat-square&logo=bluesky&logoColor=white)](https://bsky.app/profile/muhdaliyan.bsky.social)
+[![Instagram](https://img.shields.io/badge/Instagram-Follow-E4405F?style=flat-square&logo=instagram&logoColor=white)](https://www.instagram.com/a1iyan__/)
+
+</div>
+
+
+<hr>
+
+ ## ⚡ Overview
+ 
 **Zeer** is an OpenSource agentic AI CLI that connects to multiple providers (OpenAI, Gemini, Claude, Ollama) with **tool-calling capabilities**, an **extensible skills system**, and a **clean box-style UI**.  
 
-Think of it as **Claude Code for the terminal**, provider-agnostic and developer-friendly.
 
 <img src="https://i.ibb.co/sxRF8qQ/image.png" alt="image" border="0">
 
